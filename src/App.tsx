@@ -28,7 +28,8 @@ import {
   ChevronRight,
   Trash2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from 'react-markdown';
