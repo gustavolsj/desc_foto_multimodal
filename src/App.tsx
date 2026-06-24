@@ -44,6 +44,17 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 
+// One-time migration of legacy GEMINI_API_KEY to GEMINI_API_KEY_FREE if both slots are empty
+if (typeof window !== 'undefined') {
+  const legacyKey = localStorage.getItem('GEMINI_API_KEY');
+  const freeKey = localStorage.getItem('GEMINI_API_KEY_FREE');
+  const paidKey = localStorage.getItem('GEMINI_API_KEY_PAID');
+  
+  if (legacyKey && !freeKey && !paidKey) {
+    localStorage.setItem('GEMINI_API_KEY_FREE', legacyKey);
+  }
+}
+
 // Initialize Gemini API
 const getActiveKeyType = (): 'free' | 'paid' => {
   return (localStorage.getItem('GEMINI_API_KEY_ACTIVE_TYPE') as 'free' | 'paid') || 'free';
@@ -54,7 +65,7 @@ const getApiKey = () => {
   if (activeType === 'paid') {
     return localStorage.getItem('GEMINI_API_KEY_PAID') || '';
   }
-  return localStorage.getItem('GEMINI_API_KEY_FREE') || localStorage.getItem('GEMINI_API_KEY') || process.env.GEMINI_API_KEY || '';
+  return localStorage.getItem('GEMINI_API_KEY_FREE') || process.env.GEMINI_API_KEY || '';
 };
 
 let ai = new GoogleGenAI({ apiKey: getApiKey() });
@@ -68,6 +79,12 @@ const updateAiInstance = (freeKey: string, paidKey: string, activeType: 'free' |
   
   const selectedKey = activeType === 'paid' ? paidKey : freeKey;
   ai = new GoogleGenAI({ apiKey: selectedKey || process.env.GEMINI_API_KEY || '' });
+};
+
+const maskApiKey = (key: string | null) => {
+  if (!key) return '';
+  if (key.length <= 5) return key;
+  return `*******${key.slice(-5)}`;
 };
 
 interface AnalysisResult {
@@ -104,13 +121,22 @@ export default function App() {
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   
   const [apiKeyInputFree, setApiKeyInputFree] = useState(() => 
-    localStorage.getItem('GEMINI_API_KEY_FREE') || localStorage.getItem('GEMINI_API_KEY') || ''
+    maskApiKey(localStorage.getItem('GEMINI_API_KEY_FREE'))
   );
   const [apiKeyInputPaid, setApiKeyInputPaid] = useState(() => 
-    localStorage.getItem('GEMINI_API_KEY_PAID') || ''
+    maskApiKey(localStorage.getItem('GEMINI_API_KEY_PAID'))
   );
   const [activeKeyType, setActiveKeyType] = useState<'free' | 'paid'>(() => getActiveKeyType());
   const [tempActiveType, setTempActiveType] = useState<'free' | 'paid'>(() => getActiveKeyType());
+
+  const toggleActiveKeyType = (type: 'free' | 'paid') => {
+    const originalFree = localStorage.getItem('GEMINI_API_KEY_FREE') || '';
+    const originalPaid = localStorage.getItem('GEMINI_API_KEY_PAID') || '';
+    updateAiInstance(originalFree, originalPaid, type);
+    setActiveKeyType(type);
+    setApiKeyInputFree(maskApiKey(originalFree));
+    setApiKeyInputPaid(maskApiKey(originalPaid));
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -212,8 +238,20 @@ export default function App() {
   };
 
   const saveSettings = () => {
-    updateAiInstance(apiKeyInputFree, apiKeyInputPaid, tempActiveType);
-    setActiveKeyType(tempActiveType);
+    let freeKey = apiKeyInputFree;
+    let paidKey = apiKeyInputPaid;
+
+    const originalFree = localStorage.getItem('GEMINI_API_KEY_FREE') || '';
+    const originalPaid = localStorage.getItem('GEMINI_API_KEY_PAID') || '';
+
+    if (freeKey.startsWith('*******')) {
+      freeKey = originalFree;
+    }
+    if (paidKey.startsWith('*******')) {
+      paidKey = originalPaid;
+    }
+
+    updateAiInstance(freeKey, paidKey, activeKeyType);
     setShowSettings(false);
     window.location.reload(); // Refresh to re-init everything with new key
   };
@@ -537,11 +575,7 @@ export default function App() {
             <div className="flex items-center gap-1 border border-border/60 bg-muted/40 p-1 rounded-md h-8">
               <span className="text-[9px] font-mono text-muted-foreground uppercase px-1.5 tracking-wider">Servicio:</span>
               <button
-                onClick={() => {
-                  setActiveKeyType('free');
-                  setTempActiveType('free');
-                  updateAiInstance(apiKeyInputFree, apiKeyInputPaid, 'free');
-                }}
+                onClick={() => toggleActiveKeyType('free')}
                 className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
                   activeKeyType === 'free'
                     ? 'bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/20 shadow-sm'
@@ -552,11 +586,7 @@ export default function App() {
                 <Key className="w-2.5 h-2.5" /> Gratis
               </button>
               <button
-                onClick={() => {
-                  setActiveKeyType('paid');
-                  setTempActiveType('paid');
-                  updateAiInstance(apiKeyInputFree, apiKeyInputPaid, 'paid');
-                }}
+                onClick={() => toggleActiveKeyType('paid')}
                 className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
                   activeKeyType === 'paid'
                     ? 'bg-blue-500/15 text-blue-400 font-bold border border-blue-500/20 shadow-sm'
@@ -1048,38 +1078,6 @@ export default function App() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  
-                  {/* Selector Segmentado de Tipo Activo */}
-                  <div className="space-y-2">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Servicio Activo:</span>
-                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/60 border border-border/60 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => setTempActiveType('free')}
-                        className={`py-2 text-xs font-mono rounded-md flex items-center justify-center gap-1.5 transition-all ${
-                          tempActiveType === 'free'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        <Key className="w-3.5 h-3.5" /> 🔑 Gratis (AI Studio)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTempActiveType('paid')}
-                        className={`py-2 text-xs font-mono rounded-md flex items-center justify-center gap-1.5 transition-all ${
-                          tempActiveType === 'paid'
-                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        <CreditCard className="w-3.5 h-3.5" /> 💳 Pago (Cloud / Pay-as-you-go)
-                      </button>
-                    </div>
-                  </div>
-
-                  <Separator className="bg-border/40" />
-
                   {/* Inputs */}
                   <div className="space-y-4">
                     {/* Clave Gratuita */}
@@ -1091,9 +1089,14 @@ export default function App() {
                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/20 text-emerald-400 font-mono">Recomendado</Badge>
                       </div>
                       <Input 
-                        type="password"
+                        type="text"
                         placeholder="Ingresa tu clave gratuita (comienza con AIzaSy...)"
                         value={apiKeyInputFree}
+                        onFocus={() => {
+                          if (apiKeyInputFree.startsWith('*******')) {
+                            setApiKeyInputFree('');
+                          }
+                        }}
                         onChange={(e) => setApiKeyInputFree(e.target.value)}
                         className="font-mono text-xs h-9"
                       />
@@ -1108,9 +1111,14 @@ export default function App() {
                         <CreditCard className="w-3 h-3" /> Llave de Pago (Vertex AI / Cloud Console)
                       </label>
                       <Input 
-                        type="password"
+                        type="text"
                         placeholder="Ingresa tu clave de pago"
                         value={apiKeyInputPaid}
+                        onFocus={() => {
+                          if (apiKeyInputPaid.startsWith('*******')) {
+                            setApiKeyInputPaid('');
+                          }
+                        }}
                         onChange={(e) => setApiKeyInputPaid(e.target.value)}
                         className="font-mono text-xs h-9"
                       />
@@ -1118,25 +1126,6 @@ export default function App() {
                         Para proyectos de producción o cuotas ilimitadas de pago por uso.
                       </p>
                     </div>
-                  </div>
-
-                  {/* Bloque Informativo sobre Google Cloud Console */}
-                  <div className="p-3 bg-muted/30 border border-border/40 rounded-lg text-[11px] leading-relaxed space-y-2 text-muted-foreground">
-                    <span className="font-mono uppercase text-[9px] tracking-wider text-amber-500 font-bold block">💡 Guía para Google Console & AI Studio</span>
-                    <p>
-                      Si estás en Google Cloud Console y te pregunta sobre el acceso a datos:
-                    </p>
-                    <ul className="list-disc pl-4 space-y-1 text-[10px]">
-                      <li>
-                        <strong>No requieres crear un Cliente de OAuth ni una Cuenta de Servicio</strong> para un API Key normal de Gemini. Bypassea esa sección.
-                      </li>
-                      <li>
-                        Para obtener la clave gratuita de forma directa y fácil, ve a <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="underline text-primary">aistudio.google.com</a>, haz clic en "Get API Key" y créala con un botón. Es mucho más simple que Google Cloud Console.
-                      </li>
-                      <li>
-                        Si prefieres la consola de Google Cloud, ve a la sección <strong>"API y servicios" &gt; "Credenciales" &gt; clic en "+ Crear credenciales" &gt; elige "Clave de API" (API Key)</strong>. Así obtendrás la clave simple directamente.
-                      </li>
-                    </ul>
                   </div>
 
                   <div className="flex gap-2 pt-2">
