@@ -26,6 +26,7 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Trash2,
   CheckCircle2,
   AlertCircle,
@@ -85,6 +86,7 @@ export default function App() {
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('GEMINI_API_KEY') || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -274,9 +276,20 @@ export default function App() {
 
       const analysis = JSON.parse(response.text);
       setItems(prev => prev.map((it, i) => i === index ? { ...it, result: analysis, isAnalyzing: false } : it));
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error analyzing image:", err);
-      setItems(prev => prev.map((it, i) => i === index ? { ...it, isAnalyzing: false, error: "Error en el análisis de IA" } : it));
+      let errorMsg = "Error en el análisis de IA";
+      
+      const errStr = JSON.stringify(err) + " " + String(err) + " " + (err?.message || "");
+      if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("quota") || errStr.includes("Quota")) {
+        errorMsg = "Límite de cuota de la API excedido (Error 429). Por favor, configura tu propia API Key de Gemini en Configuración para continuar de forma ilimitada y gratuita.";
+      } else if (errStr.includes("API key not valid") || errStr.includes("API_KEY_INVALID") || errStr.includes("not found") || errStr.includes("invalid key")) {
+        errorMsg = "La API Key de Gemini ingresada es inválida o expiró. Por favor, revísala en Configuración.";
+      } else if (err?.message) {
+        errorMsg = `Error de IA: ${err.message}`;
+      }
+      
+      setItems(prev => prev.map((it, i) => i === index ? { ...it, isAnalyzing: false, error: errorMsg } : it));
     }
   };
 
@@ -290,34 +303,178 @@ export default function App() {
     setIsBatchAnalyzing(false);
   };
 
-  const exportCurrentToCSV = () => {
+  const exportCurrentToCSV = (formatType: 'dc' | 'cb') => {
     if (!currentItem || !currentItem.result) return;
     const res = currentItem.result;
 
-    const headers = ["dc:title", "dc:creator", "dc:subject", "dc:description", "dc:date", "dc:coverage", "dc:format", "ai:confidence", "ai:justification", "ai:material_description"];
-    const row = [
-      res.descriptores[0] || "Sin título",
-      res.autor_probable,
-      res.descriptores.join("; "),
-      res.descripcion.replace(/"/g, '""'),
-      res.epoca_estimada,
-      `${res.ubicacion_estimada} (${res.coordenadas.lat}, ${res.coordenadas.lng})`,
-      "image/jpeg",
-      `${res.confianza}%`,
-      res.justificacion.replace(/"/g, '""'),
-      res.descripcion_material.replace(/"/g, '""')
-    ];
+    const descMaterialLower = res.descripcion_material.toLowerCase();
+    
+    // Polaridad (Positivo / Negativo)
+    let polaridad = "Positivo";
+    if (descMaterialLower.includes("negativo")) {
+      polaridad = "Negativo";
+    }
+
+    // Tipología (Impresión, Diapositiva, Negativo, Tarjeta Postal, etc.)
+    let tipologia = "Impresión";
+    if (descMaterialLower.includes("postal") || currentItem.name.toLowerCase().includes("postcard") || currentItem.name.toLowerCase().includes("postal")) {
+      tipologia = "Tarjeta Postal";
+    } else if (descMaterialLower.includes("diapositiva")) {
+      tipologia = "Diapositiva";
+    } else if (descMaterialLower.includes("negativo")) {
+      tipologia = "Negativo";
+    }
+
+    // Soporte (Papel, Vidrio, Película, Metal, etc.)
+    let soporte = "Papel";
+    if (descMaterialLower.includes("vidrio")) {
+      soporte = "Vidrio";
+    } else if (descMaterialLower.includes("metal") || descMaterialLower.includes("daguerrotipo")) {
+      soporte = "Metal";
+    } else if (descMaterialLower.includes("película") || descMaterialLower.includes("acetato") || descMaterialLower.includes("nitrato") || descMaterialLower.includes("pelicula")) {
+      soporte = "Película";
+    }
+
+    // Iluminación (Reflexión / Transmisión)
+    let iluminacion = "Reflexión";
+    if (soporte === "Vidrio" || soporte === "Película" || polaridad === "Negativo") {
+      iluminacion = "Transmisión";
+    }
+
+    // Tono (Monocromático / Policromático / Sepia)
+    let tono = "Monocromático";
+    if (descMaterialLower.includes("color") || descMaterialLower.includes("policrom")) {
+      tono = "Policromático";
+    } else if (descMaterialLower.includes("sepia")) {
+      tono = "Sepia";
+    }
+
+    // Proceso
+    let proceso = "Impresión plata gelatina de revelado";
+    if (descMaterialLower.includes("albúmina") || descMaterialLower.includes("albumina")) {
+      proceso = "Albúmina";
+    } else if (descMaterialLower.includes("daguerrotipo")) {
+      proceso = "Daguerrotipo";
+    } else if (descMaterialLower.includes("colodión") || descMaterialLower.includes("colodion")) {
+      proceso = "Colodión húmedo";
+    } else if (descMaterialLower.includes("cianotipo")) {
+      proceso = "Cianotipo";
+    } else if (descMaterialLower.includes("platino")) {
+      proceso = "Platinotipia";
+    } else {
+      const match = res.descripcion_material.match(/^([^.,]+)/);
+      if (match && match[1] && match[1].length < 60) {
+        proceso = match[1].trim();
+      }
+    }
+
+    const objectId = currentItem.name.replace(/\.[^/.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_") || `item_${currentItem.id}`;
+    const cleanTitle = res.descriptores[0] ? (res.descriptores[0].charAt(0).toUpperCase() + res.descriptores[0].slice(1)) : "Sin título";
+
+    let headers: string[];
+    let row: string[];
+    let filenamePrefix: string;
+
+    if (formatType === 'cb') {
+      headers = [
+        "objectid",
+        "filename",
+        "title",
+        "format",
+        "subject",
+        "creator",
+        "date",
+        "description",
+        "",
+        "location",
+        "latitude",
+        "longitude",
+        "source",
+        "identifier",
+        "type",
+        "youtubeid",
+        "language",
+        "rights",
+        "rightsstatement",
+        "polaridad",
+        "tipologia",
+        "soporte",
+        "iluminacion",
+        "tono",
+        "proceso"
+      ];
+      row = [
+        objectId,
+        currentItem.name,
+        cleanTitle,
+        "image/jpeg",
+        res.descriptores.join("; "),
+        res.autor_probable,
+        res.epoca_estimada,
+        res.descripcion,
+        "",
+        res.ubicacion_estimada,
+        res.coordenadas.lat.toString(),
+        res.coordenadas.lng.toString(),
+        "Archivo Histórico Vision",
+        currentItem.id,
+        "Image;StillImage",
+        "",
+        "es",
+        "",
+        "http://rightsstatements.org/vocab/NoC-US/1.0/",
+        polaridad,
+        tipologia,
+        soporte,
+        iluminacion,
+        tono,
+        proceso
+      ];
+      filenamePrefix = "cb_";
+    } else {
+      headers = [
+        "dc:title", 
+        "dc:creator", 
+        "dc:subject", 
+        "dc:description", 
+        "dc:date", 
+        "dc:coverage", 
+        "dc:format", 
+        "ai:confidence", 
+        "ai:justification", 
+        "ai:material_description"
+      ];
+      row = [
+        cleanTitle,
+        res.autor_probable,
+        res.descriptores.join("; "),
+        res.descripcion,
+        res.epoca_estimada,
+        `${res.ubicacion_estimada} (${res.coordenadas.lat}, ${res.coordenadas.lng})`,
+        "image/jpeg",
+        `${res.confianza}%`,
+        res.justificacion,
+        res.descripcion_material
+      ];
+      filenamePrefix = "catalogacion_";
+    }
 
     const csvContent = [
       headers.join(","),
-      row.map(field => `"${field}"`).join(",")
+      row.map(field => {
+        const escaped = field.replace(/"/g, '""');
+        if (escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') || escaped.includes('\r')) {
+          return `"${escaped}"`;
+        }
+        return escaped;
+      }).join(",")
     ].join("\n");
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `catalogacion_${currentItem.name.split('.')[0]}_${Date.now()}.csv`);
+    link.setAttribute("download", `${filenamePrefix}${currentItem.name.split('.')[0]}_${Date.now()}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -568,11 +725,62 @@ export default function App() {
                       </Button>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 relative">
                        {currentItem.result && (
-                         <Button variant="default" size="sm" onClick={exportCurrentToCSV} className="h-8 text-xs">
-                           <Download className="w-3 h-3 mr-2" /> Exportar CSV
-                         </Button>
+                         <div className="relative">
+                           <Button 
+                             variant="default" 
+                             size="sm" 
+                             onClick={() => setShowExportDropdown(!showExportDropdown)} 
+                             className="h-8 text-xs flex items-center gap-1.5"
+                           >
+                             <Download className="w-3 h-3" /> 
+                             Exportar Metadatos
+                             <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showExportDropdown ? 'rotate-180' : ''}`} />
+                           </Button>
+                           
+                           <AnimatePresence>
+                             {showExportDropdown && (
+                               <>
+                                 {/* Overlay to close dropdown */}
+                                 <div 
+                                   className="fixed inset-0 z-10" 
+                                   onClick={() => setShowExportDropdown(false)} 
+                                 />
+                                 <motion.div
+                                   initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                                   animate={{ opacity: 1, y: 0, scale: 1 }}
+                                   exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                                   transition={{ duration: 0.15 }}
+                                   className="absolute right-0 mt-2 w-56 rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-20 overflow-hidden"
+                                 >
+                                   <div className="p-1 flex flex-col">
+                                     <button
+                                       onClick={() => {
+                                         exportCurrentToCSV('dc');
+                                         setShowExportDropdown(false);
+                                       }}
+                                       className="w-full text-left px-3 py-2 text-xs rounded hover:bg-accent hover:text-accent-foreground transition-colors flex flex-col gap-0.5"
+                                     >
+                                       <span className="font-medium">Formato Dublin Core</span>
+                                       <span className="text-[10px] text-muted-foreground">Estándar de biblioteca (dc:title, dc:creator)</span>
+                                     </button>
+                                     <button
+                                       onClick={() => {
+                                         exportCurrentToCSV('cb');
+                                         setShowExportDropdown(false);
+                                       }}
+                                       className="w-full text-left px-3 py-2 text-xs rounded hover:bg-accent hover:text-accent-foreground transition-colors border-t border-border/40 mt-1 pt-2 flex flex-col gap-0.5"
+                                     >
+                                       <span className="font-medium text-primary">Collection Builder</span>
+                                       <span className="text-[10px] text-muted-foreground">Estructura estática optimizada (prefijo cb:)</span>
+                                     </button>
+                                   </div>
+                                 </motion.div>
+                               </>
+                             )}
+                           </AnimatePresence>
+                         </div>
                        )}
                     </div>
                   </div>
@@ -602,11 +810,23 @@ export default function App() {
                           </div>
                         )}
                         {currentItem.error && (
-                          <div className="absolute inset-0 bg-destructive/10 backdrop-blur-sm flex items-center justify-center p-6 text-center">
-                            <div className="space-y-2">
+                          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 text-center">
+                            <div className="space-y-4 max-w-sm bg-card border border-destructive/25 p-5 rounded-lg shadow-xl">
                               <AlertCircle className="w-8 h-8 text-destructive mx-auto" />
-                              <p className="text-xs font-mono text-destructive uppercase">{currentItem.error}</p>
-                              <Button variant="outline" size="sm" onClick={() => analyzeImage(currentIndex!)}>Reintentar</Button>
+                              <div className="space-y-1">
+                                <h4 className="text-xs font-mono uppercase tracking-widest text-destructive">Error en el Proceso</h4>
+                                <p className="text-xs text-foreground/80 leading-relaxed font-sans">{currentItem.error}</p>
+                              </div>
+                              <div className="flex gap-2 justify-center">
+                                <Button variant="outline" size="sm" onClick={() => analyzeImage(currentIndex!)}>
+                                  Reintentar
+                                </Button>
+                                {(currentItem.error.includes("cuota") || currentItem.error.includes("API Key") || currentItem.error.includes("API_KEY_INVALID")) && (
+                                  <Button variant="default" size="sm" onClick={() => setShowSettings(true)}>
+                                    Configurar API Key
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
