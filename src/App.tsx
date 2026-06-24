@@ -30,7 +30,9 @@ import {
   Trash2,
   CheckCircle2,
   AlertCircle,
-  Settings
+  Settings,
+  Key,
+  CreditCard
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from 'react-markdown';
@@ -43,16 +45,29 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 
 // Initialize Gemini API
+const getActiveKeyType = (): 'free' | 'paid' => {
+  return (localStorage.getItem('GEMINI_API_KEY_ACTIVE_TYPE') as 'free' | 'paid') || 'free';
+};
+
 const getApiKey = () => {
-  return localStorage.getItem('GEMINI_API_KEY') || process.env.GEMINI_API_KEY || '';
+  const activeType = getActiveKeyType();
+  if (activeType === 'paid') {
+    return localStorage.getItem('GEMINI_API_KEY_PAID') || '';
+  }
+  return localStorage.getItem('GEMINI_API_KEY_FREE') || localStorage.getItem('GEMINI_API_KEY') || process.env.GEMINI_API_KEY || '';
 };
 
 let ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 // Function to update AI instance when key changes
-const updateAiInstance = (newKey: string) => {
-  localStorage.setItem('GEMINI_API_KEY', newKey);
-  ai = new GoogleGenAI({ apiKey: newKey });
+const updateAiInstance = (freeKey: string, paidKey: string, activeType: 'free' | 'paid') => {
+  localStorage.setItem('GEMINI_API_KEY_FREE', freeKey);
+  localStorage.setItem('GEMINI_API_KEY_PAID', paidKey);
+  localStorage.setItem('GEMINI_API_KEY_ACTIVE_TYPE', activeType);
+  localStorage.setItem('GEMINI_API_KEY', activeType === 'free' ? freeKey : paidKey);
+  
+  const selectedKey = activeType === 'paid' ? paidKey : freeKey;
+  ai = new GoogleGenAI({ apiKey: selectedKey || process.env.GEMINI_API_KEY || '' });
 };
 
 interface AnalysisResult {
@@ -87,7 +102,16 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('GEMINI_API_KEY') || '');
+  
+  const [apiKeyInputFree, setApiKeyInputFree] = useState(() => 
+    localStorage.getItem('GEMINI_API_KEY_FREE') || localStorage.getItem('GEMINI_API_KEY') || ''
+  );
+  const [apiKeyInputPaid, setApiKeyInputPaid] = useState(() => 
+    localStorage.getItem('GEMINI_API_KEY_PAID') || ''
+  );
+  const [activeKeyType, setActiveKeyType] = useState<'free' | 'paid'>(() => getActiveKeyType());
+  const [tempActiveType, setTempActiveType] = useState<'free' | 'paid'>(() => getActiveKeyType());
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -188,7 +212,8 @@ export default function App() {
   };
 
   const saveSettings = () => {
-    updateAiInstance(apiKeyInput);
+    updateAiInstance(apiKeyInputFree, apiKeyInputPaid, tempActiveType);
+    setActiveKeyType(tempActiveType);
     setShowSettings(false);
     window.location.reload(); // Refresh to re-init everything with new key
   };
@@ -508,13 +533,51 @@ export default function App() {
             <h1 className="text-2xl font-heading font-bold tracking-tight">Archivo Histórico Vision</h1>
           </div>
           <div className="hidden md:flex items-center gap-4">
+            {/* Quick API Key Type Switcher */}
+            <div className="flex items-center gap-1 border border-border/60 bg-muted/40 p-1 rounded-md h-8">
+              <span className="text-[9px] font-mono text-muted-foreground uppercase px-1.5 tracking-wider">Servicio:</span>
+              <button
+                onClick={() => {
+                  setActiveKeyType('free');
+                  setTempActiveType('free');
+                  updateAiInstance(apiKeyInputFree, apiKeyInputPaid, 'free');
+                }}
+                className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
+                  activeKeyType === 'free'
+                    ? 'bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/20 shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+                title="Clave Gratuita de Google AI Studio"
+              >
+                <Key className="w-2.5 h-2.5" /> Gratis
+              </button>
+              <button
+                onClick={() => {
+                  setActiveKeyType('paid');
+                  setTempActiveType('paid');
+                  updateAiInstance(apiKeyInputFree, apiKeyInputPaid, 'paid');
+                }}
+                className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
+                  activeKeyType === 'paid'
+                    ? 'bg-blue-500/15 text-blue-400 font-bold border border-blue-500/20 shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+                title="Clave de Pago (Vertex AI / Pay-as-you-go)"
+              >
+                <CreditCard className="w-2.5 h-2.5" /> Pago
+              </button>
+            </div>
+
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => setShowSettings(!showSettings)} 
-              className={`text-xs uppercase font-mono tracking-tighter ${!getApiKey() ? 'text-red-500 animate-pulse' : ''}`}
+              onClick={() => {
+                setTempActiveType(activeKeyType);
+                setShowSettings(true);
+              }} 
+              className={`text-xs uppercase font-mono tracking-tighter h-8 ${!getApiKey() ? 'text-red-500 animate-pulse' : ''}`}
             >
-              <Settings className="w-3 h-3 mr-1" /> {getApiKey() ? 'Configuración' : 'Configurar API Key'}
+              <Settings className="w-3 h-3 mr-1" /> Llaves API
             </Button>
             <Button variant="ghost" size="sm" onClick={reset} className="text-xs uppercase font-mono tracking-tighter">
               <Trash2 className="w-3 h-3 mr-1" /> Limpiar Todo
@@ -973,34 +1036,112 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md"
+              className="w-full max-w-lg"
             >
-              <Card>
-                <CardHeader>
+              <Card className="border-border/80 shadow-2xl">
+                <CardHeader className="pb-4">
                   <CardTitle className="text-sm font-mono uppercase tracking-widest flex items-center gap-2">
-                    <Settings className="w-4 h-4" /> Configuración de Acceso
+                    <Settings className="w-4 h-4 text-primary" /> CONFIGURACIÓN DE LLAVES GEMINI
                   </CardTitle>
+                  <CardDescription className="text-xs">
+                    Elige qué nivel de servicio deseas usar y configura tus llaves de API de forma segura en tu navegador.
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-5">
+                  
+                  {/* Selector Segmentado de Tipo Activo */}
                   <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Para usar esta app en un servidor estático (como GitHub Pages), cada usuario debe proveer su propia llave de Gemini. 
-                      Tu llave se guarda localmente en este navegador.
-                    </p>
-                    <Input 
-                      type="password"
-                      placeholder="GEMINI_API_KEY"
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      className="font-mono text-xs"
-                    />
-                    <p className="text-[10px] text-muted-foreground italic">
-                      Obtén una gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank" className="underline text-primary">Google AI Studio</a>.
-                    </p>
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Servicio Activo:</span>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/60 border border-border/60 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setTempActiveType('free')}
+                        className={`py-2 text-xs font-mono rounded-md flex items-center justify-center gap-1.5 transition-all ${
+                          tempActiveType === 'free'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Key className="w-3.5 h-3.5" /> 🔑 Gratis (AI Studio)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTempActiveType('paid')}
+                        className={`py-2 text-xs font-mono rounded-md flex items-center justify-center gap-1.5 transition-all ${
+                          tempActiveType === 'paid'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <CreditCard className="w-3.5 h-3.5" /> 💳 Pago (Cloud / Pay-as-you-go)
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button className="flex-1" onClick={saveSettings}>Guardar y Recargar</Button>
-                    <Button variant="ghost" onClick={() => setShowSettings(false)}>Cancelar</Button>
+
+                  <Separator className="bg-border/40" />
+
+                  {/* Inputs */}
+                  <div className="space-y-4">
+                    {/* Clave Gratuita */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium flex items-center gap-1.5 text-emerald-400">
+                          <Key className="w-3 h-3" /> Llave Gratuita (Google AI Studio)
+                        </label>
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/20 text-emerald-400 font-mono">Recomendado</Badge>
+                      </div>
+                      <Input 
+                        type="password"
+                        placeholder="Ingresa tu clave gratuita (comienza con AIzaSy...)"
+                        value={apiKeyInputFree}
+                        onChange={(e) => setApiKeyInputFree(e.target.value)}
+                        className="font-mono text-xs h-9"
+                      />
+                      <p className="text-[10px] text-muted-foreground leading-normal">
+                        Para uso gratuito personal. Obtén tu clave en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline text-primary inline-flex items-center gap-0.5 hover:text-primary/85">Google AI Studio <ExternalLink className="w-2.5 h-2.5" /></a> de forma inmediata.
+                      </p>
+                    </div>
+
+                    {/* Clave de Pago */}
+                    <div className="space-y-1.5 pt-1">
+                      <label className="text-xs font-medium flex items-center gap-1.5 text-blue-400">
+                        <CreditCard className="w-3 h-3" /> Llave de Pago (Vertex AI / Cloud Console)
+                      </label>
+                      <Input 
+                        type="password"
+                        placeholder="Ingresa tu clave de pago"
+                        value={apiKeyInputPaid}
+                        onChange={(e) => setApiKeyInputPaid(e.target.value)}
+                        className="font-mono text-xs h-9"
+                      />
+                      <p className="text-[10px] text-muted-foreground leading-normal">
+                        Para proyectos de producción o cuotas ilimitadas de pago por uso.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bloque Informativo sobre Google Cloud Console */}
+                  <div className="p-3 bg-muted/30 border border-border/40 rounded-lg text-[11px] leading-relaxed space-y-2 text-muted-foreground">
+                    <span className="font-mono uppercase text-[9px] tracking-wider text-amber-500 font-bold block">💡 Guía para Google Console & AI Studio</span>
+                    <p>
+                      Si estás en Google Cloud Console y te pregunta sobre el acceso a datos:
+                    </p>
+                    <ul className="list-disc pl-4 space-y-1 text-[10px]">
+                      <li>
+                        <strong>No requieres crear un Cliente de OAuth ni una Cuenta de Servicio</strong> para un API Key normal de Gemini. Bypassea esa sección.
+                      </li>
+                      <li>
+                        Para obtener la clave gratuita de forma directa y fácil, ve a <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="underline text-primary">aistudio.google.com</a>, haz clic en "Get API Key" y créala con un botón. Es mucho más simple que Google Cloud Console.
+                      </li>
+                      <li>
+                        Si prefieres la consola de Google Cloud, ve a la sección <strong>"API y servicios" &gt; "Credenciales" &gt; clic en "+ Crear credenciales" &gt; elige "Clave de API" (API Key)</strong>. Así obtendrás la clave simple directamente.
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <Button className="flex-1 text-xs h-9 uppercase font-mono tracking-wider" onClick={saveSettings}>Guardar y Recargar</Button>
+                    <Button variant="ghost" className="text-xs h-9 uppercase font-mono tracking-wider" onClick={() => setShowSettings(false)}>Cancelar</Button>
                   </div>
                 </CardContent>
               </Card>
