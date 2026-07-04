@@ -32,7 +32,11 @@ import {
   AlertCircle,
   Settings,
   Key,
-  CreditCard
+  CreditCard,
+  Copy,
+  Check,
+  FileCode,
+  Bookmark
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from 'react-markdown';
@@ -111,6 +115,212 @@ interface ImageItem {
   error: string | null;
 }
 
+const ANALYSIS_PROMPT = `Actúa como un archivista profesional experto en la descripción de fotografías históricas de México, con acceso a bases de datos globales de museos, archivos y bibliotecas y normas de descripcion como la ISADG y la norma mexicana de catalogacio0n de fotografia, IPTC subjects. Analiza las fotografías e identifica su contenido con la mayor precisión posible. Proporciona los siguientes elementos: 
+- Titulo sugerido en máximo 6 palabras
+- descripción narrativa en 50 palabras, 
+- tres frases o palabras clave que describan los temas, aquí  no repitas información de otros campos, 
+fecha estimada (solo pon el año).  
+- ubicación estimada,  
+- ciudad y pais,  
+- coordenadas geográficas latitud y longitud, 
+
+En la sección 'descripcion_material', identifica lo siguiente 
+- Técnica o proceso fotográfico (por ejemplo, albumina, plata gelatina, difusion de colorantes, etc)
+- Tipología fotografica (imopresion, diapositiva, negativo o imagen de cámara)
+- soporte físico (debe ser únicamente una de estas opciones: papel, metal, vidrio, o plastico)
+- Polaridad (positivo o negativo)
+- Tono (debe ser únicamente una de estas opciones: monocromática o policromática)
+- Otros elementos distintivos de una fotografía analógica (rollo 35mm con perforaciones, placa con muescas, marco de un daguerrotipo, etc.).
+- Fabricante y modelo de película solo si hay indicios como muescas, codigos o textos que lo indiquen
+
+En la sección 'justificacion', realiza lo siguiente:
+1. Explica detalladamente los argumentos técnicos (estilo fotográfico, vestimenta, arquitectura, monumentos o lugares reconocibles, elementos tecnologicos de alguna epoca presentes) que sustentan tu análisis.
+2. Busca y proporciona enlaces específicos y directos a registros de catálogos de museos o artículos de investigación que traten exactamente sobre el evento, el lugar o los elementos visuales identificados. Evita enlaces genéricos a páginas de inicio; busca la URL del objeto o registro específico si es posible.
+
+Responde en formato JSON.`;
+
+interface PromptOptions {
+  includeTitulo: boolean;
+  includeDescripcion: boolean;
+  includePalabrasClave: boolean;
+  includeFecha: boolean;
+  includeUbicacion: boolean;
+  includeCiudadPais: boolean;
+  includeCoordenadas: boolean;
+  includeTecnica: boolean;
+  includeTipologia: boolean;
+  includeSoporte: boolean;
+  includePolaridad: boolean;
+  includeTono: boolean;
+  includeOtrosElementos: boolean;
+  includeFabricante: boolean;
+}
+
+const DEFAULT_OPTIONS: PromptOptions = {
+  includeTitulo: true,
+  includeDescripcion: true,
+  includePalabrasClave: true,
+  includeFecha: true,
+  includeUbicacion: true,
+  includeCiudadPais: true,
+  includeCoordenadas: true,
+  includeTecnica: true,
+  includeTipologia: true,
+  includeSoporte: true,
+  includePolaridad: true,
+  includeTono: true,
+  includeOtrosElementos: true,
+  includeFabricante: true,
+};
+
+function buildDynamicPrompt(options: PromptOptions): string {
+  const contentItems: string[] = [];
+  if (options.includeTitulo) {
+    contentItems.push("- Título sugerido en máximo 6 palabras (colócalo en 'descriptores[0]').");
+  }
+  if (options.includeDescripcion) {
+    contentItems.push("- Descripción narrativa de unas 50 palabras (campo 'descripcion').");
+  }
+  if (options.includePalabrasClave) {
+    contentItems.push("- Tres palabras/frases clave de temas descriptivos (colócalas en 'descriptores').");
+  }
+  if (options.includeFecha) {
+    contentItems.push("- Fecha estimada de captura (indica solo el año en 'epoca_estimada').");
+  }
+  if (options.includeUbicacion) {
+    contentItems.push("- Ubicación estimada (campo 'ubicacion_estimada').");
+  }
+  if (options.includeCiudadPais) {
+    contentItems.push("- Ciudad y país (campo 'ubicacion_estimada').");
+  }
+  if (options.includeCoordenadas) {
+    contentItems.push("- Coordenadas geográficas latitud y longitud decimales (campo 'coordenadas').");
+  }
+
+  const materialItems: string[] = [];
+  if (options.includeTecnica) {
+    materialItems.push("- Técnica o proceso fotográfico (por ejemplo, albúmina, plata gelatina, difusión de colorantes, etc.).");
+  }
+  if (options.includeTipologia) {
+    materialItems.push("- Tipología fotográfica (impresión, diapositiva, negativo o imagen de cámara).");
+  }
+  if (options.includeSoporte) {
+    materialItems.push("- Soporte físico (papel, metal, plástico o vidrio).");
+  }
+  if (options.includePolaridad) {
+    materialItems.push("- Polaridad (positivo o negativo).");
+  }
+  if (options.includeTono) {
+    materialItems.push("- Tono (monocroma o policroma).");
+  }
+  if (options.includeOtrosElementos) {
+    materialItems.push("- Otros elementos distintivos analógicos (rollo 35mm con perforaciones, placa con muescas, marcos, etc.).");
+  }
+  if (options.includeFabricante) {
+    materialItems.push("- Fabricante y modelo de película si hay indicios.");
+  }
+
+  let prompt = `Actúa como archivista profesional de fotografía histórica de México. Analiza la imagen y genera ÚNICAMENTE los siguientes aspectos solicitados:\n\n`;
+
+  if (contentItems.length > 0) {
+    prompt += `Identificación de Contenido:\n${contentItems.join("\n")}\n\n`;
+  }
+
+  if (materialItems.length > 0) {
+    prompt += `Materialidad Física (campo 'descripcion_material'):\n${materialItems.join("\n")}\n\n`;
+  }
+
+  prompt += `En la sección 'justificacion':
+1. Explica brevemente los argumentos técnicos que sustentan tu análisis.
+2. Proporciona de ser posible enlaces directos y específicos a registros de catálogos de museos o artículos que traten exactamente sobre el evento o lugar identificado.\n\n`;
+
+  prompt += `Responde estrictamente en formato JSON utilizando el esquema de salida especificado.`;
+
+  return prompt;
+}
+
+function buildDynamicSchema(options: PromptOptions) {
+  const properties: any = {
+    confianza: {
+      type: Type.NUMBER,
+      description: "Nivel de certeza del análisis (0-100).",
+    },
+    justificacion: {
+      type: Type.STRING,
+      description: "Argumentos técnicos y enlaces precisos a fuentes confiables en formato Markdown.",
+    },
+  };
+
+  const required = ["confianza", "justificacion"];
+
+  if (options.includeDescripcion) {
+    properties.descripcion = {
+      type: Type.STRING,
+      description: "Un párrafo breve que describe el contenido histórico de la imagen.",
+    };
+    required.push("descripcion");
+  }
+
+  if (options.includeTitulo || options.includePalabrasClave) {
+    properties.descriptores = {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Un array de descriptores clave. El primer elemento es el título sugerido.",
+    };
+    required.push("descriptores");
+  }
+
+  if (options.includeUbicacion || options.includeCiudadPais) {
+    properties.ubicacion_estimada = {
+      type: Type.STRING,
+      description: "Nombre de la ciudad, región o lugar específico.",
+    };
+    required.push("ubicacion_estimada");
+  }
+
+  if (options.includeCoordenadas) {
+    properties.coordenadas = {
+      type: Type.OBJECT,
+      properties: {
+        lat: { type: Type.NUMBER },
+        lng: { type: Type.NUMBER },
+      },
+      required: ["lat", "lng"],
+    };
+    required.push("coordenadas");
+  }
+
+  if (options.includeFecha) {
+    properties.epoca_estimada = {
+      type: Type.STRING,
+      description: "Década o año aproximado de la fotografía.",
+    };
+    required.push("epoca_estimada");
+  }
+
+  const hasMaterial = options.includeTecnica || 
+                      options.includeTipologia || 
+                      options.includeSoporte || 
+                      options.includePolaridad || 
+                      options.includeTono || 
+                      options.includeOtrosElementos || 
+                      options.includeFabricante;
+
+  if (hasMaterial) {
+    properties.descripcion_material = {
+      type: Type.STRING,
+      description: "Detalles técnicos sobre el soporte físico, película y fabricante.",
+    };
+    required.push("descripcion_material");
+  }
+
+  return {
+    type: Type.OBJECT,
+    properties,
+    required,
+  };
+}
+
 export default function App() {
   const [items, setItems] = useState<ImageItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
@@ -119,6 +329,31 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [showAllExportDropdown, setShowAllExportDropdown] = useState(false);
+  const [showPromptModal, setShowPromptModal] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  
+  const [promptMode, setPromptMode] = useState<'custom' | 'structured'>(() => {
+    return (localStorage.getItem('CATALOG_PROMPT_MODE') as 'custom' | 'structured') || 'custom';
+  });
+  
+  const [promptOptions, setPromptOptions] = useState<PromptOptions>(() => {
+    const saved = localStorage.getItem('CATALOG_PROMPT_OPTIONS');
+    if (saved) {
+      try {
+        return { ...DEFAULT_OPTIONS, ...JSON.parse(saved) };
+      } catch (e) {
+        return DEFAULT_OPTIONS;
+      }
+    }
+    return DEFAULT_OPTIONS;
+  });
+
+  const [tempPromptMode, setTempPromptMode] = useState<'custom' | 'structured'>('custom');
+  const [tempPromptOptions, setTempPromptOptions] = useState<PromptOptions>(DEFAULT_OPTIONS);
+
+  const [editablePrompt, setEditablePrompt] = useState(() => localStorage.getItem('CATALOG_USER_PROMPT') || ANALYSIS_PROMPT);
+  const [tempPrompt, setTempPrompt] = useState(() => localStorage.getItem('CATALOG_USER_PROMPT') || ANALYSIS_PROMPT);
   
   const [apiKeyInputFree, setApiKeyInputFree] = useState(() => 
     maskApiKey(localStorage.getItem('GEMINI_API_KEY_FREE'))
@@ -265,29 +500,12 @@ export default function App() {
     try {
       const base64Data = item.url.split(',')[1];
       
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: base64Data,
-              },
-            },
-            {
-              text: "Actúa como un archivero histórico experto con acceso a bases de datos globales. Analiza esta fotografía de un archivo histórico e identifica su contenido con la mayor precisión posible. Proporciona una descripción, tres descriptores clave, la ubicación estimada con coordenadas geográficas aproximadas, la época estimada y el autor probable. \n\nEn la sección 'justificacion', realiza lo siguiente:\n1. Explica detalladamente los argumentos técnicos (estilo fotográfico, vestimenta, arquitectura, tecnología presente) que sustentan tu análisis.\n2. Busca y proporciona enlaces específicos y directos a registros de catálogos de museos (como el Smithsonian, British Museum, Archivo General de la Nación, etc.) o artículos de investigación que traten exactamente sobre el evento, el lugar o los elementos visuales identificados. Evita enlaces genéricos a páginas de inicio; busca la URL del objeto o registro específico si es posible.\n\nEn la sección 'descripcion_material', identifica el soporte físico probable:\n- Tipo de fotografía analógica (rollo 35mm con perforaciones, placa con muescas, daguerrotipo, etc.).\n- Fabricante y modelo de película probable (ej. Kodak Tri-X, Ilford HP5, Agfa).\n- Rango de años en que se comercializó o usó ese material específico.\n- Cualquier otra característica material deducible.\n\nResponde en formato JSON.",
-            },
-          ],
-        },
-        tools: [
-          {
-            googleSearch: {}
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
+      const promptToSend = promptMode === 'custom' 
+        ? editablePrompt 
+        : buildDynamicPrompt(promptOptions);
+      
+      const dynamicSchema = promptMode === 'custom' 
+        ? {
             type: Type.OBJECT,
             properties: {
               descripcion: {
@@ -333,11 +551,57 @@ export default function App() {
               },
             },
             required: ["descripcion", "descriptores", "ubicacion_estimada", "coordenadas", "epoca_estimada", "autor_probable", "confianza", "justificacion", "descripcion_material"],
-          },
+          }
+        : buildDynamicSchema(promptOptions);
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: base64Data,
+              },
+            },
+            {
+              text: promptToSend,
+            },
+          ],
+        },
+        tools: [
+          {
+            googleSearch: {}
+          }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: dynamicSchema,
         },
       } as any);
+ 
+      const parsed = JSON.parse(response.text);
+      
+      const defaultResult = {
+        descripcion: "No solicitado",
+        descriptores: ["No solicitado"],
+        ubicacion_estimada: "No solicitado",
+        coordenadas: { lat: 19.4326, lng: -99.1332 },
+        epoca_estimada: "No solicitado",
+        autor_probable: "No solicitado",
+        confianza: 0,
+        justificacion: "*Información no solicitada en este análisis.*",
+        descripcion_material: "No solicitado"
+      };
 
-      const analysis = JSON.parse(response.text);
+      const analysis = { ...defaultResult, ...parsed };
+      if (parsed.coordenadas) {
+        analysis.coordenadas = { ...defaultResult.coordenadas, ...parsed.coordenadas };
+      }
+      if (parsed.descriptores && Array.isArray(parsed.descriptores)) {
+        analysis.descriptores = parsed.descriptores.length > 0 ? parsed.descriptores : ["No solicitado"];
+      }
+
       setItems(prev => prev.map((it, i) => i === index ? { ...it, result: analysis, isAnalyzing: false } : it));
     } catch (err: any) {
       console.error("Error analyzing image:", err);
@@ -388,28 +652,36 @@ export default function App() {
       tipologia = "Negativo";
     }
 
-    // Soporte (Papel, Vidrio, Película, Metal, etc.)
-    let soporte = "Papel";
+    // Soporte Físico (papel, metal, vidrio, o plastico)
+    let soporte = "papel";
     if (descMaterialLower.includes("vidrio")) {
-      soporte = "Vidrio";
-    } else if (descMaterialLower.includes("metal") || descMaterialLower.includes("daguerrotipo")) {
-      soporte = "Metal";
-    } else if (descMaterialLower.includes("película") || descMaterialLower.includes("acetato") || descMaterialLower.includes("nitrato") || descMaterialLower.includes("pelicula")) {
-      soporte = "Película";
+      soporte = "vidrio";
+    } else if (descMaterialLower.includes("metal") || descMaterialLower.includes("daguerrotipo") || descMaterialLower.includes("ferrotipo")) {
+      soporte = "metal";
+    } else if (
+      descMaterialLower.includes("película") || 
+      descMaterialLower.includes("pelicula") || 
+      descMaterialLower.includes("acetato") || 
+      descMaterialLower.includes("nitrato") || 
+      descMaterialLower.includes("plástico") || 
+      descMaterialLower.includes("plastico") || 
+      descMaterialLower.includes("poliester") ||
+      descMaterialLower.includes("poliéster") ||
+      descMaterialLower.includes("film")
+    ) {
+      soporte = "plastico";
     }
 
     // Iluminación (Reflexión / Transmisión)
     let iluminacion = "Reflexión";
-    if (soporte === "Vidrio" || soporte === "Película" || polaridad === "Negativo") {
+    if (soporte === "vidrio" || soporte === "plastico" || polaridad === "Negativo") {
       iluminacion = "Transmisión";
     }
 
-    // Tono (Monocromático / Policromático / Sepia)
-    let tono = "Monocromático";
-    if (descMaterialLower.includes("color") || descMaterialLower.includes("policrom")) {
-      tono = "Policromático";
-    } else if (descMaterialLower.includes("sepia")) {
-      tono = "Sepia";
+    // Tono (monocromática o policromática)
+    let tono = "monocromática";
+    if (descMaterialLower.includes("color") || descMaterialLower.includes("policrom") || descMaterialLower.includes("policromática") || descMaterialLower.includes("policromatica")) {
+      tono = "policromática";
     }
 
     // Proceso
@@ -432,7 +704,79 @@ export default function App() {
     }
 
     const objectId = currentItem.name.replace(/\.[^/.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_") || `item_${currentItem.id}`;
-    const cleanTitle = res.descriptores[0] ? (res.descriptores[0].charAt(0).toUpperCase() + res.descriptores[0].slice(1)) : "Sin título";
+
+    // Apply strict filtering if we are in structured mode
+    const isStructured = promptMode === 'structured';
+    
+    const cleanTitle = (isStructured && !promptOptions.includeTitulo) 
+      ? "" 
+      : (res.descriptores[0] && res.descriptores[0] !== "No solicitado"
+          ? (res.descriptores[0].charAt(0).toUpperCase() + res.descriptores[0].slice(1)) 
+          : "Sin título");
+
+    const subjectVal = (isStructured && !promptOptions.includePalabrasClave)
+      ? ""
+      : res.descriptores.filter(d => d !== "No solicitado").join("; ");
+
+    const creatorVal = res.autor_probable === "No solicitado" ? "" : res.autor_probable;
+
+    const dateVal = (isStructured && !promptOptions.includeFecha)
+      ? ""
+      : (res.epoca_estimada === "No solicitado" ? "" : res.epoca_estimada);
+
+    const descriptionVal = (isStructured && !promptOptions.includeDescripcion)
+      ? ""
+      : (res.descripcion === "No solicitado" ? "" : res.descripcion);
+
+    const locationVal = (isStructured && !promptOptions.includeUbicacion && !promptOptions.includeCiudadPais)
+      ? ""
+      : (res.ubicacion_estimada === "No solicitado" ? "" : res.ubicacion_estimada);
+
+    const latVal = (isStructured && !promptOptions.includeCoordenadas)
+      ? ""
+      : res.coordenadas.lat.toString();
+
+    const lngVal = (isStructured && !promptOptions.includeCoordenadas)
+      ? ""
+      : res.coordenadas.lng.toString();
+
+    const polaridadVal = (isStructured && !promptOptions.includePolaridad)
+      ? ""
+      : polaridad;
+
+    const tipologiaVal = (isStructured && !promptOptions.includeTipologia)
+      ? ""
+      : tipologia;
+
+    const soporteVal = (isStructured && !promptOptions.includeSoporte)
+      ? ""
+      : soporte;
+
+    const iluminacionVal = (isStructured && !promptOptions.includeSoporte && !promptOptions.includePolaridad)
+      ? ""
+      : iluminacion;
+
+    const tonoVal = (isStructured && !promptOptions.includeTono)
+      ? ""
+      : tono;
+
+    const procesoVal = (isStructured && !promptOptions.includeTecnica)
+      ? ""
+      : proceso;
+
+    // Dublin Core coverage computation
+    let coverageParts: string[] = [];
+    if (!isStructured || promptOptions.includeUbicacion || promptOptions.includeCiudadPais) {
+      if (res.ubicacion_estimada && res.ubicacion_estimada !== "No solicitado") {
+        coverageParts.push(res.ubicacion_estimada);
+      }
+    }
+    if (!isStructured || promptOptions.includeCoordenadas) {
+      if (res.coordenadas && res.coordenadas.lat !== 0 && res.coordenadas.lng !== 0) {
+        coverageParts.push(`(${res.coordenadas.lat}, ${res.coordenadas.lng})`);
+      }
+    }
+    const coverageVal = coverageParts.join(" ");
 
     let headers: string[];
     let row: string[];
@@ -471,14 +815,14 @@ export default function App() {
         currentItem.name,
         cleanTitle,
         "image/jpeg",
-        res.descriptores.join("; "),
-        res.autor_probable,
-        res.epoca_estimada,
-        res.descripcion,
+        subjectVal,
+        creatorVal,
+        dateVal,
+        descriptionVal,
         "",
-        res.ubicacion_estimada,
-        res.coordenadas.lat.toString(),
-        res.coordenadas.lng.toString(),
+        locationVal,
+        latVal,
+        lngVal,
         "Archivo Histórico Vision",
         currentItem.id,
         "Image;StillImage",
@@ -486,12 +830,12 @@ export default function App() {
         "es",
         "",
         "http://rightsstatements.org/vocab/NoC-US/1.0/",
-        polaridad,
-        tipologia,
-        soporte,
-        iluminacion,
-        tono,
-        proceso
+        polaridadVal,
+        tipologiaVal,
+        soporteVal,
+        iluminacionVal,
+        tonoVal,
+        procesoVal
       ];
       filenamePrefix = "cb_";
     } else {
@@ -509,15 +853,15 @@ export default function App() {
       ];
       row = [
         cleanTitle,
-        res.autor_probable,
-        res.descriptores.join("; "),
-        res.descripcion,
-        res.epoca_estimada,
-        `${res.ubicacion_estimada} (${res.coordenadas.lat}, ${res.coordenadas.lng})`,
+        creatorVal,
+        subjectVal,
+        descriptionVal,
+        dateVal,
+        coverageVal,
         "image/jpeg",
         `${res.confianza}%`,
         res.justificacion,
-        res.descripcion_material
+        (isStructured && !promptOptions.includeTecnica && !promptOptions.includeTipologia && !promptOptions.includeSoporte && !promptOptions.includePolaridad && !promptOptions.includeTono && !promptOptions.includeOtrosElementos && !promptOptions.includeFabricante) ? "" : res.descripcion_material
       ];
       filenamePrefix = "catalogacion_";
     }
@@ -525,7 +869,7 @@ export default function App() {
     const csvContent = [
       headers.join(","),
       row.map(field => {
-        const escaped = field.replace(/"/g, '""');
+        const escaped = (field || "").replace(/"/g, '""');
         if (escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') || escaped.includes('\r')) {
           return `"${escaped}"`;
         }
@@ -538,6 +882,272 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
     link.setAttribute("download", `${filenamePrefix}${currentItem.name.split('.')[0]}_${Date.now()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportAllToCSV = (formatType: 'dc' | 'cb') => {
+    const catalogedItems = items.filter(it => it.result !== null);
+    if (catalogedItems.length === 0) return;
+
+    let headers: string[] = [];
+    const rows: string[][] = [];
+    let filenamePrefix = "catalogacion_lote_";
+
+    if (formatType === 'cb') {
+      headers = [
+        "objectid",
+        "filename",
+        "title",
+        "format",
+        "subject",
+        "creator",
+        "date",
+        "description",
+        "",
+        "location",
+        "latitude",
+        "longitude",
+        "source",
+        "identifier",
+        "type",
+        "youtubeid",
+        "language",
+        "rights",
+        "rightsstatement",
+        "polaridad",
+        "tipologia",
+        "soporte",
+        "iluminacion",
+        "tono",
+        "proceso"
+      ];
+      filenamePrefix = "cb_lote_";
+    } else {
+      headers = [
+        "dc:title", 
+        "dc:creator", 
+        "dc:subject", 
+        "dc:description", 
+        "dc:date", 
+        "dc:coverage", 
+        "dc:format", 
+        "ai:confidence", 
+        "ai:justification", 
+        "ai:material_description"
+      ];
+    }
+
+    const isStructured = promptMode === 'structured';
+
+    catalogedItems.forEach(item => {
+      const res = item.result!;
+      const descMaterialLower = res.descripcion_material.toLowerCase();
+      
+      // Polaridad (Positivo / Negativo)
+      let polaridad = "Positivo";
+      if (descMaterialLower.includes("negativo")) {
+        polaridad = "Negativo";
+      }
+
+      // Tipología (Impresión, Diapositiva, Negativo, Tarjeta Postal, etc.)
+      let tipologia = "Impresión";
+      if (descMaterialLower.includes("postal") || item.name.toLowerCase().includes("postcard") || item.name.toLowerCase().includes("postal")) {
+        tipologia = "Tarjeta Postal";
+      } else if (descMaterialLower.includes("diapositiva")) {
+        tipologia = "Diapositiva";
+      } else if (descMaterialLower.includes("negativo")) {
+        tipologia = "Negativo";
+      }
+
+      // Soporte Físico (papel, metal, vidrio, o plastico)
+      let soporte = "papel";
+      if (descMaterialLower.includes("vidrio")) {
+        soporte = "vidrio";
+      } else if (descMaterialLower.includes("metal") || descMaterialLower.includes("daguerrotipo") || descMaterialLower.includes("ferrotipo")) {
+        soporte = "metal";
+      } else if (
+        descMaterialLower.includes("película") || 
+        descMaterialLower.includes("pelicula") || 
+        descMaterialLower.includes("acetato") || 
+        descMaterialLower.includes("nitrato") || 
+        descMaterialLower.includes("plástico") || 
+        descMaterialLower.includes("plastico") || 
+        descMaterialLower.includes("poliester") ||
+        descMaterialLower.includes("poliéster") ||
+        descMaterialLower.includes("film")
+      ) {
+        soporte = "plastico";
+      }
+
+      // Iluminación (Reflexión / Transmisión)
+      let iluminacion = "Reflexión";
+      if (soporte === "vidrio" || soporte === "plastico" || polaridad === "Negativo") {
+        iluminacion = "Transmisión";
+      }
+
+      // Tono (monocromática o policromática)
+      let tono = "monocromática";
+      if (descMaterialLower.includes("color") || descMaterialLower.includes("policrom") || descMaterialLower.includes("policromática") || descMaterialLower.includes("policromatica")) {
+        tono = "policromática";
+      }
+
+      // Proceso
+      let proceso = "Impresión plata gelatina de revelado";
+      if (descMaterialLower.includes("albúmina") || descMaterialLower.includes("albumina")) {
+        proceso = "Albúmina";
+      } else if (descMaterialLower.includes("daguerrotipo")) {
+        proceso = "Daguerrotipo";
+      } else if (descMaterialLower.includes("colodión") || descMaterialLower.includes("colodion")) {
+        proceso = "Colodión húmedo";
+      } else if (descMaterialLower.includes("cianotipo")) {
+        proceso = "Cianotipo";
+      } else if (descMaterialLower.includes("platino")) {
+        proceso = "Platinotipia";
+      } else {
+        const match = res.descripcion_material.match(/^([^.,]+)/);
+        if (match && match[1] && match[1].length < 60) {
+          proceso = match[1].trim();
+        }
+      }
+
+      const objectId = item.name.replace(/\.[^/.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_") || `item_${item.id}`;
+      
+      const cleanTitle = (isStructured && !promptOptions.includeTitulo) 
+        ? "" 
+        : (res.descriptores[0] && res.descriptores[0] !== "No solicitado"
+            ? (res.descriptores[0].charAt(0).toUpperCase() + res.descriptores[0].slice(1)) 
+            : "Sin título");
+
+      const subjectVal = (isStructured && !promptOptions.includePalabrasClave)
+        ? ""
+        : res.descriptores.filter(d => d !== "No solicitado").join("; ");
+
+      const creatorVal = res.autor_probable === "No solicitado" ? "" : res.autor_probable;
+
+      const dateVal = (isStructured && !promptOptions.includeFecha)
+        ? ""
+        : (res.epoca_estimada === "No solicitado" ? "" : res.epoca_estimada);
+
+      const descriptionVal = (isStructured && !promptOptions.includeDescripcion)
+        ? ""
+        : (res.descripcion === "No solicitado" ? "" : res.descripcion);
+
+      const locationVal = (isStructured && !promptOptions.includeUbicacion && !promptOptions.includeCiudadPais)
+        ? ""
+        : (res.ubicacion_estimada === "No solicitado" ? "" : res.ubicacion_estimada);
+
+      const latVal = (isStructured && !promptOptions.includeCoordenadas)
+        ? ""
+        : res.coordenadas.lat.toString();
+
+      const lngVal = (isStructured && !promptOptions.includeCoordenadas)
+        ? ""
+        : res.coordenadas.lng.toString();
+
+      const polaridadVal = (isStructured && !promptOptions.includePolaridad)
+        ? ""
+        : polaridad;
+
+      const tipologiaVal = (isStructured && !promptOptions.includeTipologia)
+        ? ""
+        : tipologia;
+
+      const soporteVal = (isStructured && !promptOptions.includeSoporte)
+        ? ""
+        : soporte;
+
+      const iluminacionVal = (isStructured && !promptOptions.includeSoporte && !promptOptions.includePolaridad)
+        ? ""
+        : iluminacion;
+
+      const tonoVal = (isStructured && !promptOptions.includeTono)
+        ? ""
+        : tono;
+
+      const procesoVal = (isStructured && !promptOptions.includeTecnica)
+        ? ""
+        : proceso;
+
+      let coverageParts: string[] = [];
+      if (!isStructured || promptOptions.includeUbicacion || promptOptions.includeCiudadPais) {
+        if (res.ubicacion_estimada && res.ubicacion_estimada !== "No solicitado") {
+          coverageParts.push(res.ubicacion_estimada);
+        }
+      }
+      if (!isStructured || promptOptions.includeCoordenadas) {
+        if (res.coordenadas && res.coordenadas.lat !== 0 && res.coordenadas.lng !== 0) {
+          coverageParts.push(`(${res.coordenadas.lat}, ${res.coordenadas.lng})`);
+        }
+      }
+      const coverageVal = coverageParts.join(" ");
+
+      let row: string[];
+      if (formatType === 'cb') {
+        row = [
+          objectId,
+          item.name,
+          cleanTitle,
+          "image/jpeg",
+          subjectVal,
+          creatorVal,
+          dateVal,
+          descriptionVal,
+          "",
+          locationVal,
+          latVal,
+          lngVal,
+          "Archivo Histórico Vision",
+          item.id,
+          "Image;StillImage",
+          "",
+          "es",
+          "",
+          "http://rightsstatements.org/vocab/NoC-US/1.0/",
+          polaridadVal,
+          tipologiaVal,
+          soporteVal,
+          iluminacionVal,
+          tonoVal,
+          procesoVal
+        ];
+      } else {
+        row = [
+          cleanTitle,
+          creatorVal,
+          subjectVal,
+          descriptionVal,
+          dateVal,
+          coverageVal,
+          "image/jpeg",
+          `${res.confianza}%`,
+          res.justificacion,
+          (isStructured && !promptOptions.includeTecnica && !promptOptions.includeTipologia && !promptOptions.includeSoporte && !promptOptions.includePolaridad && !promptOptions.includeTono && !promptOptions.includeOtrosElementos && !promptOptions.includeFabricante) ? "" : res.descripcion_material
+        ];
+      }
+      rows.push(row);
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => 
+        row.map(field => {
+          const escaped = (field || "").replace(/"/g, '""');
+          if (escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') || escaped.includes('\r')) {
+            return `"${escaped}"`;
+          }
+          return escaped;
+        }).join(",")
+      )
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filenamePrefix}${Date.now()}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -609,9 +1219,78 @@ export default function App() {
             >
               <Settings className="w-3 h-3 mr-1" /> Llaves API
             </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => {
+                setTempPrompt(editablePrompt);
+                setTempPromptMode(promptMode);
+                setTempPromptOptions(promptOptions);
+                setShowPromptModal(true);
+              }} 
+              className="text-xs uppercase font-mono tracking-tighter h-8 text-amber-500 hover:text-amber-400 hover:bg-amber-500/5"
+            >
+              <FileCode className="w-3 h-3 mr-1" /> Ver Prompt
+            </Button>
             <Button variant="ghost" size="sm" onClick={reset} className="text-xs uppercase font-mono tracking-tighter">
               <Trash2 className="w-3 h-3 mr-1" /> Limpiar Todo
             </Button>
+
+            {items.some(it => it.result !== null) && (
+              <div className="relative">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setShowAllExportDropdown(!showAllExportDropdown)} 
+                  className="text-xs uppercase font-mono tracking-tighter h-8 text-emerald-500 hover:text-emerald-400 font-semibold animate-in fade-in zoom-in duration-300"
+                >
+                  <Download className="w-3 h-3 mr-1" /> Exportar Lote
+                  <ChevronDown className={`w-3 h-3 ml-1 transition-transform duration-200 ${showAllExportDropdown ? 'rotate-180' : ''}`} />
+                </Button>
+                
+                <AnimatePresence>
+                  {showAllExportDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowAllExportDropdown(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 mt-2 w-56 rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-20 overflow-hidden"
+                      >
+                        <div className="p-1 flex flex-col text-left">
+                          <div className="px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest text-muted-foreground border-b border-border/40 mb-1">
+                            Exportar Lote Completo ({items.filter(it => it.result !== null).length})
+                          </div>
+                          <button
+                            onClick={() => {
+                              exportAllToCSV('dc');
+                              setShowAllExportDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs rounded hover:bg-accent hover:text-accent-foreground transition-colors flex flex-col gap-0.5"
+                          >
+                            <span className="font-medium text-foreground">Formato Dublin Core</span>
+                            <span className="text-[10px] text-muted-foreground">Estándar (dc:title, dc:creator, etc.)</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              exportAllToCSV('cb');
+                              setShowAllExportDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs rounded hover:bg-accent hover:text-accent-foreground transition-colors border-t border-border/40 mt-1 pt-2 flex flex-col gap-0.5"
+                          >
+                            <span className="font-medium text-primary">Collection Builder</span>
+                            <span className="text-[10px] text-muted-foreground">Estructura optimizada (prefijo cb:)</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-6 text-sm font-medium opacity-70">
               <span className="flex items-center gap-1"><History className="w-4 h-4" /> Catálogo</span>
@@ -792,6 +1471,8 @@ export default function App() {
                 </ScrollArea>
               </CardContent>
             </Card>
+
+
           </section>
 
           {/* Right Column: Detailed View */}
@@ -928,62 +1609,330 @@ export default function App() {
 
                     <div className="space-y-4">
                       {currentItem.result ? (
-                        <div className="space-y-4">
-                          <Card className="border-none shadow-none bg-muted/30">
-                            <CardHeader className="p-4 pb-2">
-                              <div className="flex items-center justify-between mb-4">
-                                <Badge variant="outline" className="text-[8px] font-mono uppercase tracking-tighter px-1.5 py-0">#AI-ARCHIVE</Badge>
+                        promptMode === 'structured' ? (
+                          (() => {
+                            const tableRows = [];
+                            
+                            if (promptOptions.includeTitulo) {
+                              tableRows.push({
+                                campo: "Título Sugerido",
+                                valor: currentItem.result.descriptores[0] || "No detectado",
+                                icon: <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeDescripcion) {
+                              tableRows.push({
+                                campo: "Descripción Narrativa",
+                                valor: currentItem.result.descripcion || "No detectado",
+                                icon: <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includePalabrasClave) {
+                              const tags = currentItem.result.descriptores.slice(1).filter(d => d && d !== "No solicitado");
+                              tableRows.push({
+                                campo: "Palabras Clave / Temas",
+                                valor: tags.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {tags.map((tag, i) => (
+                                      <Badge key={i} variant="secondary" className="text-[10px] py-0">{tag}</Badge>
+                                    ))}
+                                  </div>
+                                ) : "No detectadas",
+                                icon: <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeFecha) {
+                              tableRows.push({
+                                campo: "Época Estimada",
+                                valor: currentItem.result.epoca_estimada || "No detectado",
+                                icon: <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeUbicacion || promptOptions.includeCiudadPais) {
+                              tableRows.push({
+                                campo: "Ubicación Estimada",
+                                valor: currentItem.result.ubicacion_estimada || "No detectada",
+                                icon: <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeCoordenadas) {
+                              tableRows.push({
+                                campo: "Coordenadas Geográficas",
+                                valor: (
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-mono text-xs">{currentItem.result.coordenadas.lat}, {currentItem.result.coordenadas.lng}</span>
+                                    {currentItem.result.coordenadas.lat !== 0 && (
+                                      <Button 
+                                        variant="link" 
+                                        size="sm" 
+                                        className="h-auto p-0 text-[10px] font-mono uppercase text-primary"
+                                        onClick={() => window.open(`https://www.google.com/maps?q=${currentItem.result!.coordenadas.lat},${currentItem.result!.coordenadas.lng}`, '_blank')}
+                                      >
+                                        <Globe className="w-3 h-3 mr-1" /> Ver en Maps
+                                      </Button>
+                                    )}
+                                  </div>
+                                ),
+                                icon: <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            const descMaterialLower = (currentItem.result.descripcion_material || "").toLowerCase();
+                            
+                            // Polaridad (Positivo / Negativo)
+                            let polaridad = "Positivo";
+                            if (descMaterialLower.includes("negativo")) {
+                              polaridad = "Negativo";
+                            }
+
+                            // Tipología (Impresión, Diapositiva, Negativo, Tarjeta Postal, etc.)
+                            let tipologia = "Impresión";
+                            if (descMaterialLower.includes("postal") || currentItem.name.toLowerCase().includes("postcard") || currentItem.name.toLowerCase().includes("postal")) {
+                              tipologia = "Tarjeta Postal";
+                            } else if (descMaterialLower.includes("diapositiva")) {
+                              tipologia = "Diapositiva";
+                            } else if (descMaterialLower.includes("negativo")) {
+                              tipologia = "Negativo";
+                            }
+
+                            // Soporte Físico (papel, metal, vidrio, o plastico)
+                            let soporte = "papel";
+                            if (descMaterialLower.includes("vidrio")) {
+                              soporte = "vidrio";
+                            } else if (descMaterialLower.includes("metal") || descMaterialLower.includes("daguerrotipo") || descMaterialLower.includes("ferrotipo")) {
+                              soporte = "metal";
+                            } else if (
+                              descMaterialLower.includes("película") || 
+                              descMaterialLower.includes("pelicula") || 
+                              descMaterialLower.includes("acetato") || 
+                              descMaterialLower.includes("nitrato") || 
+                              descMaterialLower.includes("plástico") || 
+                              descMaterialLower.includes("plastico") || 
+                              descMaterialLower.includes("poliester") ||
+                              descMaterialLower.includes("poliéster") ||
+                              descMaterialLower.includes("film")
+                            ) {
+                              soporte = "plastico";
+                            }
+
+                            // Iluminación (Reflexión / Transmisión)
+                            let iluminacion = "Reflexión";
+                            if (soporte === "vidrio" || soporte === "plastico" || polaridad === "Negativo") {
+                              iluminacion = "Transmisión";
+                            }
+
+                            // Tono (monocromática o policromática)
+                            let tono = "monocromática";
+                            if (descMaterialLower.includes("color") || descMaterialLower.includes("policrom") || descMaterialLower.includes("policromática") || descMaterialLower.includes("policromatica")) {
+                              tono = "policromática";
+                            }
+
+                            // Proceso
+                            let proceso = "Impresión plata gelatina de revelado";
+                            if (descMaterialLower.includes("albúmina") || descMaterialLower.includes("albumina")) {
+                              proceso = "Albúmina";
+                            } else if (descMaterialLower.includes("daguerrotipo")) {
+                              proceso = "Daguerrotipo";
+                            } else if (descMaterialLower.includes("colodión") || descMaterialLower.includes("colodion")) {
+                              proceso = "Colodión húmedo";
+                            } else if (descMaterialLower.includes("cianotipo")) {
+                              proceso = "Cianotipo";
+                            } else if (descMaterialLower.includes("platino")) {
+                              proceso = "Platinotipia";
+                            } else {
+                              const match = currentItem.result.descripcion_material.match(/^([^.,]+)/);
+                              if (match && match[1] && match[1].length < 60) {
+                                proceso = match[1].trim();
+                              }
+                            }
+
+                            if (promptOptions.includeTecnica) {
+                              tableRows.push({
+                                campo: "Técnica / Proceso",
+                                valor: proceso,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeTipologia) {
+                              tableRows.push({
+                                campo: "Tipología Fotográfica",
+                                valor: tipologia,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeSoporte) {
+                              tableRows.push({
+                                campo: "Soporte Físico",
+                                valor: soporte,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includePolaridad) {
+                              tableRows.push({
+                                campo: "Polaridad",
+                                valor: polaridad,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeSoporte || promptOptions.includePolaridad) {
+                              tableRows.push({
+                                campo: "Iluminación",
+                                valor: iluminacion,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeTono) {
+                              tableRows.push({
+                                campo: "Tono / Coloración",
+                                valor: tono,
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            if (promptOptions.includeOtrosElementos || promptOptions.includeFabricante) {
+                              tableRows.push({
+                                campo: "Detalles Materiales Adicionales",
+                                valor: currentItem.result.descripcion_material || "No detectado",
+                                icon: <Film className="w-3.5 h-3.5 text-muted-foreground" />
+                              });
+                            }
+                            
+                            tableRows.push({
+                              campo: "Certidumbre del Análisis",
+                              valor: (
                                 <Badge 
-                                  variant="secondary" 
-                                  className={`text-[8px] font-mono uppercase tracking-tighter px-1.5 py-0 ${
-                                    currentItem.result.confianza > 80 ? 'bg-green-500/10 text-green-600' : 
-                                    currentItem.result.confianza > 50 ? 'bg-yellow-500/10 text-yellow-600' : 'bg-red-500/10 text-red-600'
+                                  className={`text-[10px] font-mono uppercase tracking-tighter px-1.5 py-0 ${
+                                    currentItem.result.confianza > 80 ? 'bg-green-500/10 text-green-600 border-green-500/20' : 
+                                    currentItem.result.confianza > 50 ? 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20' : 'bg-red-500/10 text-red-600 border-red-500/20'
                                   }`}
                                 >
-                                  Certidumbre: {currentItem.result.confianza}%
+                                  {currentItem.result.confianza}%
                                 </Badge>
-                              </div>
-                              <h3 className="text-2xl font-heading italic underline underline-offset-4 decoration-primary/20">
-                                {currentItem.result.descriptores[0]}
-                              </h3>
-                            </CardHeader>
-                            <CardContent className="p-4 pt-4 space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-0.5">
-                                  <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><Calendar className="w-3 h-3" /> Época</span>
-                                  <p className="text-xs font-medium">{currentItem.result.epoca_estimada}</p>
+                              ),
+                              icon: <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                            });
+                            
+                            tableRows.push({
+                              campo: "Justificación y Fuentes",
+                              valor: (
+                                <div className="text-xs leading-relaxed text-muted-foreground font-sans prose prose-xs prose-stone dark:prose-invert max-w-none prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline">
+                                  <ReactMarkdown
+                                    components={{
+                                      a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline transition-colors decoration-blue-400 underline-offset-2" />
+                                    }}
+                                  >
+                                    {currentItem.result.justificacion}
+                                  </ReactMarkdown>
                                 </div>
-                                <div className="space-y-0.5">
-                                  <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><Camera className="w-3 h-3" /> Autor</span>
-                                  <p className="text-xs font-medium truncate">{currentItem.result.autor_probable}</p>
-                                </div>
-                                <div className="col-span-2 space-y-0.5 border-t border-border/40 pt-2 mt-1">
-                                  <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Ubicación</span>
-                                  <div className="flex items-center justify-between">
-                                    <p className="text-xs font-medium">{currentItem.result.ubicacion_estimada}</p>
-                                    <Button 
-                                      variant="link" 
-                                      size="sm" 
-                                      className="h-auto p-0 text-[10px] font-mono uppercase text-primary"
-                                      onClick={() => window.open(`https://www.google.com/maps?q=${currentItem.result!.coordenadas.lat},${currentItem.result!.coordenadas.lng}`, '_blank')}
-                                    >
-                                      <Globe className="w-3 h-3 mr-1" /> Maps
-                                    </Button>
+                              ),
+                              icon: <Bookmark className="w-3.5 h-3.5 text-muted-foreground" />
+                            });
+
+                            return (
+                              <div className="space-y-4">
+                                <div className="border border-border/40 rounded-lg overflow-hidden bg-muted/10 shadow-sm">
+                                  <div className="bg-muted/30 px-4 py-3 border-b border-border/40 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <Archive className="w-4 h-4 text-primary" />
+                                      <span className="text-xs font-mono uppercase tracking-widest text-foreground font-bold">Ficha de Catalogación Estructurada</span>
+                                    </div>
+                                    <Badge variant="outline" className="text-[8px] font-mono uppercase tracking-tighter px-1.5 py-0">#AI-TABLE</Badge>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                      <thead>
+                                        <tr className="bg-muted/20 border-b border-border/30">
+                                          <th className="p-3 text-[9px] font-mono uppercase tracking-wider text-muted-foreground w-1/3">Campo</th>
+                                          <th className="p-3 text-[9px] font-mono uppercase tracking-wider text-muted-foreground w-2/3">Valor Detectado</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-border/20">
+                                        {tableRows.map((row, idx) => (
+                                          <tr key={idx} className="hover:bg-muted/5 transition-colors">
+                                            <td className="p-3 text-xs font-medium text-foreground/95 flex items-center gap-2">
+                                              {row.icon}
+                                              <span>{row.campo}</span>
+                                            </td>
+                                            <td className="p-3 text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                                              {row.valor}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
                                   </div>
                                 </div>
                               </div>
-                            </CardContent>
-                          </Card>
+                            );
+                          })()
+                        ) : (
+                          <div className="space-y-4">
+                            <Card className="border-none shadow-none bg-muted/30">
+                              <CardHeader className="p-4 pb-2">
+                                <div className="flex items-center justify-between mb-4">
+                                  <Badge variant="outline" className="text-[8px] font-mono uppercase tracking-tighter px-1.5 py-0">#AI-ARCHIVE</Badge>
+                                  <Badge 
+                                    variant="secondary" 
+                                    className={`text-[8px] font-mono uppercase tracking-tighter px-1.5 py-0 ${
+                                      currentItem.result.confianza > 80 ? 'bg-green-500/10 text-green-600' : 
+                                      currentItem.result.confianza > 50 ? 'bg-yellow-500/10 text-yellow-600' : 'bg-red-500/10 text-red-600'
+                                    }`}
+                                  >
+                                    Certidumbre: {currentItem.result.confianza}%
+                                  </Badge>
+                                </div>
+                                <h3 className="text-2xl font-heading italic underline underline-offset-4 decoration-primary/20">
+                                  {currentItem.result.descriptores[0]}
+                                </h3>
+                              </CardHeader>
+                              <CardContent className="p-4 pt-4 space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><Calendar className="w-3 h-3" /> Época</span>
+                                    <p className="text-xs font-medium">{currentItem.result.epoca_estimada}</p>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><Camera className="w-3 h-3" /> Autor</span>
+                                    <p className="text-xs font-medium truncate">{currentItem.result.autor_probable}</p>
+                                  </div>
+                                  <div className="col-span-2 space-y-0.5 border-t border-border/40 pt-2 mt-1">
+                                    <span className="text-[10px] font-mono uppercase text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Ubicación</span>
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-medium">{currentItem.result.ubicacion_estimada}</p>
+                                      <Button 
+                                        variant="link" 
+                                        size="sm" 
+                                        className="h-auto p-0 text-[10px] font-mono uppercase text-primary"
+                                        onClick={() => window.open(`https://www.google.com/maps?q=${currentItem.result!.coordenadas.lat},${currentItem.result!.coordenadas.lng}`, '_blank')}
+                                      >
+                                        <Globe className="w-3 h-3 mr-1" /> Maps
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
 
-                          <div className="space-y-3">
-                             <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                               <FileText className="w-3 h-3" /> Descripción Histórica
-                             </h4>
-                             <p className="text-sm leading-relaxed font-serif text-foreground/80">
-                               {currentItem.result.descripcion}
-                             </p>
+                            <div className="space-y-3">
+                               <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                                 <FileText className="w-3 h-3" /> Descripción Histórica
+                               </h4>
+                               <p className="text-sm leading-relaxed font-serif text-foreground/80">
+                                 {currentItem.result.descripcion}
+                               </p>
+                            </div>
                           </div>
-                        </div>
+                        )
                       ) : (
                         <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-dashed border-border/60 rounded-lg bg-muted/5 min-h-[300px] space-y-4">
                            <Archive className="w-8 h-8 text-muted-foreground/30 animate-pulse" />
@@ -996,7 +1945,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {currentItem.result && (
+                  {currentItem.result && promptMode !== 'structured' && (
                     <motion.div 
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1131,6 +2080,399 @@ export default function App() {
                   <div className="flex gap-2 pt-2">
                     <Button className="flex-1 text-xs h-9 uppercase font-mono tracking-wider" onClick={saveSettings}>Guardar y Recargar</Button>
                     <Button variant="ghost" className="text-xs h-9 uppercase font-mono tracking-wider" onClick={() => setShowSettings(false)}>Cancelar</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        )}
+
+        {showPromptModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/85 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="w-full max-w-2xl"
+            >
+              <Card className="border-amber-500/20 shadow-2xl bg-card">
+                <CardHeader className="pb-3 border-b border-border/40">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-mono uppercase tracking-widest flex items-center gap-2 text-amber-400">
+                      <FileCode className="w-4 h-4" /> Instrucciones del Agente de Catalogación
+                    </CardTitle>
+                    <Badge variant="outline" className="border-amber-500/30 text-amber-400 font-mono text-[9px] px-1.5 py-0 h-4 uppercase">
+                      Prompt de Sistema (Gemini)
+                    </Badge>
+                  </div>
+                  <CardDescription className="text-xs text-muted-foreground mt-1">
+                    Este es el prompt estructurado y las directrices precisas que se envían al modelo Gemini junto a cada imagen seleccionada para su catalogación. ¡Puedes editarlo para personalizar tus resultados!
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0 space-y-0">
+                  {/* Mode Selector Toggle */}
+                  <div className="p-4 border-b border-border/40 bg-muted/10">
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-muted/40 border border-border/35 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setTempPromptMode('custom')}
+                        className={`flex items-center justify-center gap-2 py-2 text-xs font-mono uppercase tracking-wider rounded-md transition-all ${
+                          tempPromptMode === 'custom'
+                            ? 'bg-amber-500 text-black font-semibold shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                        }`}
+                      >
+                        <FileCode className="w-3.5 h-3.5" /> Prompt General/Personalizado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTempPromptMode('structured')}
+                        className={`flex items-center justify-center gap-2 py-2 text-xs font-mono uppercase tracking-wider rounded-md transition-all ${
+                          tempPromptMode === 'structured'
+                            ? 'bg-amber-500 text-black font-semibold shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                        }`}
+                      >
+                        <Settings className="w-3.5 h-3.5" /> Selección de Campos
+                      </button>
+                    </div>
+                  </div>
+
+                  <ScrollArea className="h-[420px] p-6">
+                    {tempPromptMode === 'custom' ? (
+                      <div className="space-y-6">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Instrucción Principal (Prompt de Usuario):</span>
+                            <Button 
+                              variant="link" 
+                              size="sm" 
+                              className="text-[9px] uppercase font-mono tracking-wider text-amber-500 hover:text-amber-400 h-auto p-0"
+                              onClick={() => setTempPrompt(ANALYSIS_PROMPT)}
+                            >
+                              Restaurar Predeterminado
+                            </Button>
+                          </div>
+                          <textarea
+                            value={tempPrompt}
+                            onChange={(e) => setTempPrompt(e.target.value)}
+                            className="w-full h-[260px] p-3 rounded-lg bg-background border border-border/80 text-xs font-mono leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-amber-500/50 resize-y"
+                            placeholder="Modifica las directrices..."
+                          />
+                        </div>
+
+                        <div className="space-y-2 pb-2">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Esquema de Respuesta Requerido (JSON Output Schema):</span>
+                          <div className="p-4 rounded-lg bg-muted/20 border border-border/30 text-[11px] font-mono text-muted-foreground/90 leading-relaxed overflow-x-auto select-text">
+                            <pre>{JSON.stringify({
+                              descripcion: "Descripción breve del contenido histórico.",
+                              descriptores: ["descriptor1", "descriptor2", "descriptor3"],
+                              ubicacion_estimada: "Nombre del lugar, región o ciudad.",
+                              coordenadas: { lat: 0.0, lng: 0.0 },
+                              epoca_estimada: "Época o año estimado de captura.",
+                              autor_probable: "Fotógrafo o 'Anónimo'.",
+                              confianza: 95,
+                              justificacion: "Argumentos técnicos y referencias de catálogos en Markdown.",
+                              descripcion_material: "Soporte, tipo de fotografía, fabricante de la película."
+                            }, null, 2)}</pre>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {/* Checkbox controls header */}
+                        <div className="flex gap-4 justify-between items-center pb-3 border-b border-border/20">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Elementos de catalogación a incluir:</span>
+                          <div className="flex gap-3">
+                            <button 
+                              type="button"
+                              onClick={() => setTempPromptOptions({
+                                includeTitulo: true,
+                                includeDescripcion: true,
+                                includePalabrasClave: true,
+                                includeFecha: true,
+                                includeUbicacion: true,
+                                includeCiudadPais: true,
+                                includeCoordenadas: true,
+                                includeTecnica: true,
+                                includeTipologia: true,
+                                includeSoporte: true,
+                                includePolaridad: true,
+                                includeTono: true,
+                                includeOtrosElementos: true,
+                                includeFabricante: true,
+                              })}
+                              className="text-[10px] uppercase font-mono tracking-wider text-amber-500 hover:text-amber-400 transition-colors"
+                            >
+                              Activar Todos
+                            </button>
+                            <span className="text-border">|</span>
+                            <button 
+                              type="button"
+                              onClick={() => setTempPromptOptions({
+                                includeTitulo: false,
+                                includeDescripcion: false,
+                                includePalabrasClave: false,
+                                includeFecha: false,
+                                includeUbicacion: false,
+                                includeCiudadPais: false,
+                                includeCoordenadas: false,
+                                includeTecnica: false,
+                                includeTipologia: false,
+                                includeSoporte: false,
+                                includePolaridad: false,
+                                includeTono: false,
+                                includeOtrosElementos: false,
+                                includeFabricante: false,
+                              })}
+                              className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Desactivar Todos
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Section 1: Contenido */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-mono uppercase tracking-widest text-amber-400/90 flex items-center gap-1.5 font-semibold">
+                            <FileText className="w-3.5 h-3.5" /> Contenido e Identificación
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeTitulo} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeTitulo: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Título sugerido</span>
+                                <span className="text-[10px] text-muted-foreground">Máximo 6 palabras</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeDescripcion} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeDescripcion: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Descripción narrativa</span>
+                                <span className="text-[10px] text-muted-foreground">Extensión aproximada de 50 palabras</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includePalabrasClave} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includePalabrasClave: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Palabras clave / Temas</span>
+                                <span className="text-[10px] text-muted-foreground">Tres frases descriptivas de temas clave</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeFecha} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeFecha: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Fecha estimada</span>
+                                <span className="text-[10px] text-muted-foreground">Únicamente el año de captura</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeUbicacion} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeUbicacion: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Ubicación estimada</span>
+                                <span className="text-[10px] text-muted-foreground">Lugar específico del acontecimiento</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeCiudadPais} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeCiudadPais: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Ciudad y país</span>
+                                <span className="text-[10px] text-muted-foreground">Nombre de la ciudad y el país</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeCoordenadas} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeCoordenadas: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Coordenadas geográficas</span>
+                                <span className="text-[10px] text-muted-foreground">Latitud y longitud decimal estimada</span>
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Section 2: Materialidad */}
+                        <div className="space-y-3 pt-2">
+                          <h4 className="text-xs font-mono uppercase tracking-widest text-amber-400/90 flex items-center gap-1.5 font-semibold">
+                            <Film className="w-3.5 h-3.5" /> Materialidad y Soporte
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeTecnica} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeTecnica: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Técnica o proceso</span>
+                                <span className="text-[10px] text-muted-foreground">Albúmina, plata gelatina, difusión de color, etc.</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeTipologia} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeTipologia: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Tipología fotográfica</span>
+                                <span className="text-[10px] text-muted-foreground">Impresión, diapositiva, negativo o de cámara</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeSoporte} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeSoporte: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Soporte físico</span>
+                                <span className="text-[10px] text-muted-foreground">Papel, metal, plástico o vidrio</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includePolaridad} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includePolaridad: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Polaridad</span>
+                                <span className="text-[10px] text-muted-foreground">Positivo o negativo</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeTono} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeTono: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Tono</span>
+                                <span className="text-[10px] text-muted-foreground">Monocroma o policroma</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeOtrosElementos} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeOtrosElementos: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Otros elementos analógicos</span>
+                                <span className="text-[10px] text-muted-foreground">Rollo de 35mm, placa con muescas, marcos, etc.</span>
+                              </div>
+                            </label>
+
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 cursor-pointer transition-colors select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={tempPromptOptions.includeFabricante} 
+                                onChange={(e) => setTempPromptOptions(prev => ({ ...prev, includeFabricante: e.target.checked }))}
+                                className="mt-0.5 rounded border-border text-amber-500 focus:ring-amber-500/30 accent-amber-500"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-medium text-foreground">Fabricante y modelo de película</span>
+                                <span className="text-[10px] text-muted-foreground">Solo si existen indicios, códigos o textos</span>
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </ScrollArea>
+                  
+                  <div className="flex gap-2 p-4 border-t border-border/40 bg-muted/15 justify-end">
+                    {tempPromptMode === 'custom' && (
+                      <Button 
+                        variant="outline" 
+                        className="text-xs h-9 uppercase font-mono tracking-wider text-amber-400 border-amber-500/20 hover:bg-amber-500/5 hover:text-amber-300 mr-auto"
+                        onClick={() => {
+                          navigator.clipboard.writeText(tempPrompt);
+                          setCopiedPrompt(true);
+                          setTimeout(() => setCopiedPrompt(false), 2000);
+                        }}
+                      >
+                        {copiedPrompt ? (
+                          <span className="flex items-center gap-1"><Check className="w-3.5 h-3.5 text-emerald-500" /> ¡Copiado!</span>
+                        ) : (
+                          <span className="flex items-center gap-1"><Copy className="w-3.5 h-3.5" /> Copiar</span>
+                        )}
+                      </Button>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      className="text-xs h-9 uppercase font-mono tracking-wider" 
+                      onClick={() => setShowPromptModal(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      className="text-xs h-9 uppercase font-mono tracking-wider px-6 bg-amber-500 hover:bg-amber-600 text-black font-semibold"
+                      onClick={() => {
+                        setPromptMode(tempPromptMode);
+                        setPromptOptions(tempPromptOptions);
+                        setEditablePrompt(tempPrompt);
+                        localStorage.setItem('CATALOG_PROMPT_MODE', tempPromptMode);
+                        localStorage.setItem('CATALOG_PROMPT_OPTIONS', JSON.stringify(tempPromptOptions));
+                        localStorage.setItem('CATALOG_USER_PROMPT', tempPrompt);
+                        setShowPromptModal(false);
+                      }}
+                    >
+                      Guardar y Aplicar
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
