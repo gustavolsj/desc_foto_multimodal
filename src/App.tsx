@@ -325,6 +325,7 @@ export default function App() {
   const [items, setItems] = useState<ImageItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -486,7 +487,8 @@ export default function App() {
       paidKey = originalPaid;
     }
 
-    updateAiInstance(freeKey, paidKey, activeKeyType);
+    updateAiInstance(freeKey, paidKey, tempActiveType);
+    setActiveKeyType(tempActiveType);
     setShowSettings(false);
     window.location.reload(); // Refresh to re-init everything with new key
   };
@@ -1099,7 +1101,7 @@ export default function App() {
           locationVal,
           latVal,
           lngVal,
-          "Archivo Histórico Vision",
+          "Descripción de fotografías de archivo con IA",
           item.id,
           "Image;StillImage",
           "",
@@ -1177,47 +1179,20 @@ export default function App() {
       <header className="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Archive className="w-6 h-6 text-primary" />
-            <h1 className="text-2xl font-heading font-bold tracking-tight">Archivo Histórico Vision</h1>
+            <Archive className="w-6 h-6 text-primary animate-pulse" />
+            <h1 className="text-xl font-heading font-bold tracking-tight">Descripción de fotografías de archivo con IA</h1>
           </div>
           <div className="hidden md:flex items-center gap-4">
-            {/* Quick API Key Type Switcher */}
-            <div className="flex items-center gap-1 border border-border/60 bg-muted/40 p-1 rounded-md h-8">
-              <span className="text-[9px] font-mono text-muted-foreground uppercase px-1.5 tracking-wider">Servicio:</span>
-              <button
-                onClick={() => toggleActiveKeyType('free')}
-                className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
-                  activeKeyType === 'free'
-                    ? 'bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/20 shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                }`}
-                title="Clave Gratuita de Google AI Studio"
-              >
-                <Key className="w-2.5 h-2.5" /> Gratis
-              </button>
-              <button
-                onClick={() => toggleActiveKeyType('paid')}
-                className={`text-[10px] h-6 px-2 rounded-sm font-mono transition-all flex items-center gap-1 ${
-                  activeKeyType === 'paid'
-                    ? 'bg-blue-500/15 text-blue-400 font-bold border border-blue-500/20 shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                }`}
-                title="Clave de Pago (Vertex AI / Pay-as-you-go)"
-              >
-                <CreditCard className="w-2.5 h-2.5" /> Pago
-              </button>
-            </div>
-
             <Button 
-              variant="ghost" 
+              variant="outline" 
               size="sm" 
               onClick={() => {
                 setTempActiveType(activeKeyType);
                 setShowSettings(true);
               }} 
-              className={`text-xs uppercase font-mono tracking-tighter h-8 ${!getApiKey() ? 'text-red-500 animate-pulse' : ''}`}
+              className={`text-xs uppercase font-mono tracking-tighter h-8 border-border/60 ${!getApiKey() ? 'text-red-500 animate-pulse border-red-500/30' : 'hover:bg-accent hover:text-accent-foreground'}`}
             >
-              <Settings className="w-3 h-3 mr-1" /> Llaves API
+              <Settings className="w-3 h-3 mr-1" /> Configurar Llaves API ({activeKeyType === 'free' ? 'Gratis' : 'Pago'})
             </Button>
             <Button 
               variant="ghost" 
@@ -1291,11 +1266,7 @@ export default function App() {
               </div>
             )}
 
-            <Separator orientation="vertical" className="h-6" />
-            <div className="flex items-center gap-6 text-sm font-medium opacity-70">
-              <span className="flex items-center gap-1"><History className="w-4 h-4" /> Catálogo</span>
-              <span className="flex items-center gap-1"><Search className="w-4 h-4" /> Búsqueda</span>
-            </div>
+            {/* Header elements completed */}
           </div>
         </div>
       </header>
@@ -1396,11 +1367,42 @@ export default function App() {
                   </div>
                 )}
               </CardHeader>
+              
+              <div className="px-4 pb-3">
+                <div className="relative flex items-center">
+                  <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input 
+                    type="text"
+                    placeholder="Búsqueda en catálogo (por nombre, época, material...)" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-8 font-mono text-[10px] h-8 bg-background/50 border-border/40 focus-visible:ring-primary/40 focus-visible:ring-1"
+                  />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 text-muted-foreground hover:text-foreground text-[12px] font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <CardContent className="p-0">
-                <ScrollArea className="h-[440px] px-4">
+                <ScrollArea className="h-[396px] px-4">
                   <div className="space-y-2 pb-4">
                     <AnimatePresence initial={false}>
-                      {items.map((item, idx) => (
+                      {items.map((item, idx) => ({ item, idx })).filter(({ item }) => {
+                        if (!searchQuery) return true;
+                        const query = searchQuery.toLowerCase();
+                        const nameMatch = (item.name || "").toLowerCase().includes(query);
+                        const descMatch = (item.result?.descripcion || "").toLowerCase().includes(query);
+                        const keywordsMatch = item.result?.descriptores?.some(d => (d || "").toLowerCase().includes(query)) || false;
+                        const locationMatch = (item.result?.ubicacion_estimada || "").toLowerCase().includes(query);
+                        const processMatch = (item.result?.descripcion_material || "").toLowerCase().includes(query);
+                        return nameMatch || descMatch || keywordsMatch || locationMatch || processMatch;
+                      }).map(({ item, idx }) => (
                         <motion.div
                           key={item.id}
                           initial={{ opacity: 0, x: -10 }}
@@ -1465,6 +1467,22 @@ export default function App() {
                           <p className="text-[10px] font-mono uppercase tracking-widest">Cola Vacía</p>
                           <p className="text-[9px] uppercase tracking-tighter">Cargue imágenes para comenzar</p>
                         </div>
+                      </div>
+                    )}
+                    {items.length > 0 && items.map((item, idx) => ({ item, idx })).filter(({ item }) => {
+                      if (!searchQuery) return true;
+                      const query = searchQuery.toLowerCase();
+                      const nameMatch = (item.name || "").toLowerCase().includes(query);
+                      const descMatch = (item.result?.descripcion || "").toLowerCase().includes(query);
+                      const keywordsMatch = item.result?.descriptores?.some(d => (d || "").toLowerCase().includes(query)) || false;
+                      const locationMatch = (item.result?.ubicacion_estimada || "").toLowerCase().includes(query);
+                      const processMatch = (item.result?.descripcion_material || "").toLowerCase().includes(query);
+                      return nameMatch || descMatch || keywordsMatch || locationMatch || processMatch;
+                    }).length === 0 && (
+                      <div className="py-20 text-center space-y-2 opacity-50">
+                        <Search className="w-6 h-6 mx-auto text-muted-foreground" />
+                        <p className="text-[10px] font-mono uppercase">Sin coincidencias</p>
+                        <p className="text-[9px] text-muted-foreground">Pruebe con otros términos</p>
                       </div>
                     )}
                   </div>
@@ -2027,53 +2045,88 @@ export default function App() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
+                  {/* Selector de Servicio Activo */}
+                  <div className="space-y-2 border-b border-border/40 pb-4">
+                    <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                      Tipo de Servicio Activo:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-muted/40 border border-border/30 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setTempActiveType('free')}
+                        className={`flex items-center justify-center gap-2 py-2.5 text-xs font-mono uppercase tracking-wider rounded-md transition-all ${
+                          tempActiveType === 'free'
+                            ? 'bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/20 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                        }`}
+                      >
+                        <Key className="w-3.5 h-3.5" /> Gratis (AI Studio)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTempActiveType('paid')}
+                        className={`flex items-center justify-center gap-2 py-2.5 text-xs font-mono uppercase tracking-wider rounded-md transition-all ${
+                          tempActiveType === 'paid'
+                            ? 'bg-blue-500/15 text-blue-400 font-bold border border-blue-500/20 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                        }`}
+                      >
+                        <CreditCard className="w-3.5 h-3.5" /> Pago (Vertex AI)
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Inputs */}
                   <div className="space-y-4">
                     {/* Clave Gratuita */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium flex items-center gap-1.5 text-emerald-400">
-                          <Key className="w-3 h-3" /> Llave Gratuita (Google AI Studio)
-                        </label>
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/20 text-emerald-400 font-mono">Recomendado</Badge>
+                    <div className={`p-4 rounded-lg border transition-all ${tempActiveType === 'free' ? 'border-emerald-500/30 bg-emerald-500/5 shadow-inner' : 'border-border/40 bg-card/50 opacity-60'}`}>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium flex items-center gap-1.5 text-emerald-400">
+                            <Key className="w-3.5 h-3.5" /> Llave Gratuita (Google AI Studio)
+                          </label>
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/20 text-emerald-400 font-mono">Recomendado</Badge>
+                        </div>
+                        <Input 
+                          type="text"
+                          placeholder="Ingresa tu clave gratuita (comienza con AIzaSy...)"
+                          value={apiKeyInputFree}
+                          onFocus={() => {
+                            if (apiKeyInputFree.startsWith('*******')) {
+                              setApiKeyInputFree('');
+                            }
+                          }}
+                          onChange={(e) => setApiKeyInputFree(e.target.value)}
+                          className="font-mono text-xs h-9 bg-background/50"
+                        />
+                        <p className="text-[10px] text-muted-foreground leading-normal mt-1">
+                          Para uso gratuito personal. Obtén tu clave en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline text-primary inline-flex items-center gap-0.5 hover:text-primary/85">Google AI Studio <ExternalLink className="w-2.5 h-2.5" /></a> de forma inmediata.
+                        </p>
                       </div>
-                      <Input 
-                        type="text"
-                        placeholder="Ingresa tu clave gratuita (comienza con AIzaSy...)"
-                        value={apiKeyInputFree}
-                        onFocus={() => {
-                          if (apiKeyInputFree.startsWith('*******')) {
-                            setApiKeyInputFree('');
-                          }
-                        }}
-                        onChange={(e) => setApiKeyInputFree(e.target.value)}
-                        className="font-mono text-xs h-9"
-                      />
-                      <p className="text-[10px] text-muted-foreground leading-normal">
-                        Para uso gratuito personal. Obtén tu clave en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline text-primary inline-flex items-center gap-0.5 hover:text-primary/85">Google AI Studio <ExternalLink className="w-2.5 h-2.5" /></a> de forma inmediata.
-                      </p>
                     </div>
 
                     {/* Clave de Pago */}
-                    <div className="space-y-1.5 pt-1">
-                      <label className="text-xs font-medium flex items-center gap-1.5 text-blue-400">
-                        <CreditCard className="w-3 h-3" /> Llave de Pago (Vertex AI / Cloud Console)
-                      </label>
-                      <Input 
-                        type="text"
-                        placeholder="Ingresa tu clave de pago"
-                        value={apiKeyInputPaid}
-                        onFocus={() => {
-                          if (apiKeyInputPaid.startsWith('*******')) {
-                            setApiKeyInputPaid('');
-                          }
-                        }}
-                        onChange={(e) => setApiKeyInputPaid(e.target.value)}
-                        className="font-mono text-xs h-9"
-                      />
-                      <p className="text-[10px] text-muted-foreground leading-normal">
-                        Para proyectos de producción o cuotas ilimitadas de pago por uso.
-                      </p>
+                    <div className={`p-4 rounded-lg border transition-all ${tempActiveType === 'paid' ? 'border-blue-500/30 bg-blue-500/5 shadow-inner' : 'border-border/40 bg-card/50 opacity-60'}`}>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium flex items-center gap-1.5 text-blue-400">
+                          <CreditCard className="w-3.5 h-3.5" /> Llave de Pago (Vertex AI / Cloud Console)
+                        </label>
+                        <Input 
+                          type="text"
+                          placeholder="Ingresa tu clave de pago"
+                          value={apiKeyInputPaid}
+                          onFocus={() => {
+                            if (apiKeyInputPaid.startsWith('*******')) {
+                              setApiKeyInputPaid('');
+                            }
+                          }}
+                          onChange={(e) => setApiKeyInputPaid(e.target.value)}
+                          className="font-mono text-xs h-9 bg-background/50"
+                        />
+                        <p className="text-[10px] text-muted-foreground leading-normal mt-1">
+                          Para proyectos de producción o cuotas ilimitadas de pago por uso.
+                        </p>
+                      </div>
                     </div>
                   </div>
 

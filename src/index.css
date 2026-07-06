@@ -1,12 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: 'Cormorant Garamond', serif;
+    --font-heading: 'Plus Jakarta Sans', sans-serif;
     --font-sans: 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
     --color-sidebar-ring: var(--sidebar-ring);
@@ -50,46 +50,46 @@
 }
 
 :root {
-    --background: #f5f2ed; /* Warm paper color */
-    --foreground: #1a1a1a;
+    --background: #f8fafc; /* Sleek, modern off-white canvas */
+    --foreground: #0f172a; /* Deep slate */
     --card: #ffffff;
-    --card-foreground: #1a1a1a;
+    --card-foreground: #0f172a;
     --popover: #ffffff;
-    --popover-foreground: #1a1a1a;
-    --primary: #2c2c2c;
-    --primary-foreground: #f5f2ed;
-    --secondary: #e5e1da;
-    --secondary-foreground: #1a1a1a;
-    --muted: #e5e1da;
-    --muted-foreground: #666666;
-    --accent: #d4cfc5;
-    --accent-foreground: #1a1a1a;
+    --popover-foreground: #0f172a;
+    --primary: #2563eb; /* Vibrant modern blue */
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9; /* Slate 100 */
+    --secondary-foreground: #0f172a;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b; /* Slate 500 */
+    --accent: #e2e8f0; /* Slate 200 */
+    --accent-foreground: #0f172a;
     --destructive: oklch(0.577 0.245 27.325);
-    --border: #d4cfc5;
-    --input: #d4cfc5;
-    --ring: #1a1a1a;
-    --radius: 0.25rem; /* Sharper corners for archival feel */
+    --border: #e2e8f0; /* Slate 200 */
+    --input: #e2e8f0;
+    --ring: #2563eb;
+    --radius: 0.5rem; /* Smoother modern rounded corners */
 }
 
 .dark {
-    --background: #1a1a1a;
-    --foreground: #f5f2ed;
-    --card: #2c2c2c;
-    --card-foreground: #f5f2ed;
-    --popover: #2c2c2c;
-    --popover-foreground: #f5f2ed;
-    --primary: #f5f2ed;
-    --primary-foreground: #1a1a1a;
-    --secondary: #3a3a3a;
-    --secondary-foreground: #f5f2ed;
-    --muted: #3a3a3a;
-    --muted-foreground: #a1a1a1;
-    --accent: #4a4a4a;
-    --accent-foreground: #f5f2ed;
+    --background: #09090b; /* Zinc 950 */
+    --foreground: #fafafa;
+    --card: #18181b; /* Zinc 900 */
+    --card-foreground: #fafafa;
+    --popover: #18181b;
+    --popover-foreground: #fafafa;
+    --primary: #3b82f6; /* Modern light blue */
+    --primary-foreground: #09090b;
+    --secondary: #27272a; /* Zinc 800 */
+    --secondary-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa; /* Zinc 400 */
+    --accent: #3f3f46; /* Zinc 700 */
+    --accent-foreground: #fafafa;
     --destructive: oklch(0.704 0.191 22.216);
-    --border: #3a3a3a;
-    --input: #3a3a3a;
-    --ring: #f5f2ed;
+    --border: #27272a; /* Zinc 800 */
+    --input: #27272a;
+    --ring: #3b82f6;
 }
 
 @layer base {
