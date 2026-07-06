@@ -115,7 +115,11 @@ interface ImageItem {
   error: string | null;
 }
 
-const ANALYSIS_PROMPT = `Actúa como un archivista profesional experto en la descripción de fotografías históricas de México, con acceso a bases de datos globales de museos, archivos y bibliotecas y normas de descripcion como la ISADG y la norma mexicana de catalogacio0n de fotografia, IPTC subjects. Analiza las fotografías e identifica su contenido con la mayor precisión posible. Proporciona los siguientes elementos: 
+const ANALYSIS_PROMPT = `Actúa como un archivista profesional experto en la descripción de fotografías históricas de México, con acceso a bases de datos globales de museos, archivos y bibliotecas y normas de descripción como la ISADG y la norma mexicana de catalogación de fotografía, IPTC subjects. Analiza las fotografías e identifica su contenido con la mayor precisión posible. 
+
+CRITICAL: No intentes identificar ni nombrar personajes conocidos o famosos en la imagen (por ejemplo, presidentes, artistas, figuras históricas, etc.), ya que se cometen muchos errores de identificación visual. En su lugar, descríbelos únicamente por sus características físicas visibles, vestimenta, género aproximado y rol aparente en la escena (por ejemplo, 'un hombre de mediana edad con bigote y traje militar', 'un grupo de campesinos posando').
+
+Proporciona los siguientes elementos: 
 - Titulo sugerido en máximo 6 palabras
 - descripción narrativa en 50 palabras, 
 - tres frases o palabras clave que describan los temas, aquí  no repitas información de otros campos, 
@@ -220,7 +224,9 @@ function buildDynamicPrompt(options: PromptOptions): string {
     materialItems.push("- Fabricante y modelo de película si hay indicios.");
   }
 
-  let prompt = `Actúa como archivista profesional de fotografía histórica de México. Analiza la imagen y genera ÚNICAMENTE los siguientes aspectos solicitados:\n\n`;
+  let prompt = `Actúa como archivista profesional de fotografía histórica de México. Analiza la imagen y genera ÚNICAMENTE los siguientes aspectos solicitados.
+
+CRITICAL: No intentes identificar ni nombrar personajes conocidos o famosos en la imagen (por ejemplo, presidentes, artistas, figuras históricas, etc.), ya que se cometen muchos errores de identificación visual. En su lugar, descríbelos únicamente por sus características físicas visibles, vestimenta, género aproximado y rol aparente en la escena.\n\n`;
 
   if (contentItems.length > 0) {
     prompt += `Identificación de Contenido:\n${contentItems.join("\n")}\n\n`;
@@ -353,8 +359,24 @@ export default function App() {
   const [tempPromptMode, setTempPromptMode] = useState<'custom' | 'structured'>('custom');
   const [tempPromptOptions, setTempPromptOptions] = useState<PromptOptions>(DEFAULT_OPTIONS);
 
-  const [editablePrompt, setEditablePrompt] = useState(() => localStorage.getItem('CATALOG_USER_PROMPT') || ANALYSIS_PROMPT);
-  const [tempPrompt, setTempPrompt] = useState(() => localStorage.getItem('CATALOG_USER_PROMPT') || ANALYSIS_PROMPT);
+  const [editablePrompt, setEditablePrompt] = useState(() => {
+    const saved = localStorage.getItem('CATALOG_USER_PROMPT');
+    if (!saved) return ANALYSIS_PROMPT;
+    // Upgrade if they had the old default prompt
+    if (saved.includes('norma mexicana de catalogacio0n') && !saved.includes('personajes conocidos')) {
+      return ANALYSIS_PROMPT;
+    }
+    return saved;
+  });
+  const [tempPrompt, setTempPrompt] = useState(() => {
+    const saved = localStorage.getItem('CATALOG_USER_PROMPT');
+    if (!saved) return ANALYSIS_PROMPT;
+    // Upgrade if they had the old default prompt
+    if (saved.includes('norma mexicana de catalogacio0n') && !saved.includes('personajes conocidos')) {
+      return ANALYSIS_PROMPT;
+    }
+    return saved;
+  });
   
   const [apiKeyInputFree, setApiKeyInputFree] = useState(() => 
     maskApiKey(localStorage.getItem('GEMINI_API_KEY_FREE'))
